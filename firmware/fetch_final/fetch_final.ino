@@ -59,6 +59,14 @@ const int TRIG = 9;
 const int ECHO[5] = { 10, A1, A2, A3, A4 };     // f, lf, rf, lr, rr
 const char* USNAME[5] = { "f", "lf", "rf", "lr", "rr" };
 const int FRONT = 0, VETO_CM = 25;
+// The front-obstacle veto is OFF until the sensors are proven. An interlock
+// fed by garbage data just blocks legitimate driving: a rail glitch pinned
+// the front reading at 5 cm and forward stopped working entirely.
+//   'g 1' arms it, 'g 0' disarms, and it needs two consecutive close reads
+//   plus a plausible distance (HC-SR04 cannot resolve under ~2 cm).
+bool guardOn = false;
+int  frontHits = 0;
+const int VETO_MIN_CM = 3, VETO_CONFIRM = 2;
 int usCM[5] = { 0, 0, 0, 0, 0 };
 int usIdx = 0;
 
@@ -73,7 +81,7 @@ char line[40];
 byte lineLen = 0;
 
 void setVel(float vx, float vy, float w) {
-  if (vx > 0 && usCM[FRONT] > 0 && usCM[FRONT] < VETO_CM) vx = 0;   // veto
+  if (guardOn && vx > 0 && frontHits >= VETO_CONFIRM) vx = 0;   // veto
   curVX = vx; curVY = vy; curW = w;
   float s[4];
   s[0] = vx + vy + w;      // FL
@@ -94,8 +102,12 @@ void pingOne(int i) {
   digitalWrite(TRIG, LOW);
   unsigned long us = pulseIn(ECHO[i], HIGH, 6000UL);   // 6 ms cap ~ 1 m
   usCM[i] = us ? (int)(us / 58) : 0;
-  if (i == FRONT && curVX > 0 && usCM[FRONT] > 0 && usCM[FRONT] < VETO_CM)
-    setVel(0, curVY, curW);
+  if (i == FRONT) {
+    bool close = (usCM[FRONT] >= VETO_MIN_CM && usCM[FRONT] < VETO_CM);
+    frontHits = close ? frontHits + 1 : 0;
+    if (guardOn && curVX > 0 && frontHits >= VETO_CONFIRM)
+      setVel(0, curVY, curW);
+  }
 }
 
 void crabCircle() {
@@ -137,6 +149,9 @@ void handleLine() {
     vMode = true; lastV = millis();
   } else if (c == 't') {
     tilt.write(constrain((int)strtol(line + 1, NULL, 10), 0, 180));
+  } else if (c == 'g') {
+    guardOn = (strtol(line + 1, NULL, 10) != 0);
+    Serial.print("guard="); Serial.println(guardOn ? "ON" : "OFF");
   } else if (c == 'm') {
     char *p = line + 1;
     long idx = strtol(p, &p, 10);
@@ -159,7 +174,8 @@ void handleLine() {
       Serial.print("vx="); Serial.print(curVX);
       Serial.print(" vy="); Serial.print(curVY);
       Serial.print(" w=");  Serial.print(curW);
-      Serial.print(" spd="); Serial.println(speedPct);
+      Serial.print(" spd="); Serial.print(speedPct);
+      Serial.print(" guard="); Serial.println(guardOn ? "ON" : "OFF");
     }
     else if (c == '+' || c == '-')
       speedPct = constrain(speedPct + (c == '+' ? 10 : -10), 20, 100);
