@@ -31,6 +31,8 @@ try:
     from autopilot import Autopilot, TiltSweep
     from tag_map import TagMap
     from path_store import PathStore
+    from checkpoints import CheckpointMap
+    from navigator import Navigator
 except Exception as _e:
     Autopilot = TiltSweep = None
     print(f"[gui] autopilot unavailable: {_e}")
@@ -211,29 +213,40 @@ PAGE = r"""<!doctype html>
 </div>
 
 <div class="card">
-  <h2>Teach a route</h2>
-  <button id="homebtn" style="width:100%;height:48px;font-size:15px">
+  <h2>Checkpoints</h2>
+  <div id="cpat" style="text-align:center;font-size:13px;margin-bottom:8px;
+       color:var(--dim)">position unknown</div>
+  <button id="cphome" style="width:100%;height:48px;font-size:15px">
     Set HOME (robot is on the start spot)</button>
-  <div id="homest" style="text-align:center;font-size:12px;margin:8px 0;
-       color:var(--dim)">home not set</div>
+
+  <div style="font-size:11px;color:var(--dim);margin:10px 0 4px">
+    Drive there with the controls above, then mark it:</div>
   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-    <button class="recbtn" data-t="0" style="height:44px">rec 0</button>
-    <button class="recbtn" data-t="1" style="height:44px">rec 1</button>
-    <button class="recbtn" data-t="2" style="height:44px">rec 2</button>
-    <button class="recbtn" data-t="3" style="height:44px">rec 3</button>
-    <button class="recbtn" data-t="4" style="height:44px">rec 4</button>
+    <button class="markbtn" data-t="0" style="height:44px">mark 0</button>
+    <button class="markbtn" data-t="1" style="height:44px">mark 1</button>
+    <button class="markbtn" data-t="2" style="height:44px">mark 2</button>
+    <button class="markbtn" data-t="3" style="height:44px">mark 3</button>
+    <button class="markbtn" data-t="4" style="height:44px">mark 4</button>
   </div>
-  <button id="recstop" style="width:100%;height:48px;font-size:15px;
-          margin-top:8px;display:none;background:var(--warn)">
-    STOP recording &amp; save</button>
-  <div id="recmsg" style="text-align:center;font-size:12px;min-height:16px;
-       margin-top:6px;color:var(--dim)"></div>
-  <div id="reclist" style="font-size:12px;margin-top:8px"></div>
+
+  <div style="font-size:11px;color:var(--dim);margin:12px 0 4px">Send it:</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+    <button class="gobtn" data-t="0" style="height:46px">go 0</button>
+    <button class="gobtn" data-t="1" style="height:46px">go 1</button>
+    <button class="gobtn" data-t="2" style="height:46px">go 2</button>
+    <button class="gobtn" data-t="3" style="height:46px">go 3</button>
+    <button class="gobtn" data-t="4" style="height:46px">go 4</button>
+  </div>
+  <button class="gobtn" data-t="home" style="width:100%;height:48px;
+          font-size:15px;margin-top:8px">GO HOME</button>
+
+  <div id="cpmsg" style="text-align:center;font-size:12px;min-height:16px;
+       margin-top:8px;color:var(--dim)"></div>
+  <div id="cplist" style="font-size:12px;margin-top:8px"></div>
   <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">
-    Put the robot on HOME, press Set HOME, then press rec N and drive to
-    art piece N by hand. Turn to face its tag, calibrate it above, then
-    STOP recording. "Go to N" replays that route and the tag corrects the
-    last stretch.</div>
+    Set HOME, drive to a spot, press mark N. Everything you drove since the
+    last mark is saved as the route between them. No tag needed.
+    <a href="/user" style="color:var(--ok)">User page &rarr;</a></div>
 </div>
 
 <div class="card">
@@ -349,7 +362,37 @@ $('#rate').oninput = e => {
   clearTimeout(rateT);                       // don't spam the serial link
   rateT = setTimeout(()=> post('/rate', {sps:+e.target.value}), 120);
 };
-// --- teach & repeat ---
+// --- checkpoints ---
+async function cpPost(url, body){
+  const r = await (await fetch(url,{method:'POST',
+                    body:JSON.stringify(body||{})})).json();
+  $('#cpmsg').textContent = r.msg || '';
+  $('#cpmsg').style.color = r.ok ? 'var(--ok)' : 'var(--warn)';
+  if (r.cmap) renderCp(r.cmap);
+  return r;
+}
+$('#cphome').onclick = () => cpPost('/cp/home');
+document.querySelectorAll('.markbtn').forEach(b=>{
+  b.onclick = () => cpPost('/cp/mark', {id: b.dataset.t});
+});
+document.querySelectorAll('.gobtn').forEach(b=>{
+  b.onclick = () => cpPost('/cp/go', {id: b.dataset.t});
+});
+function renderCp(c){
+  if(!c) return;
+  $('#cpat').textContent = c.current
+      ? ('robot is at: ' + (c.nodes[c.current]?.label || c.current))
+      : 'position unknown - press Set HOME';
+  $('#cplist').innerHTML = c.edges.length
+    ? c.edges.map(e=>`<div style="display:flex;justify-content:space-between;
+        padding:4px 0;border-top:1px solid var(--line)">
+        <span>${e.from} &rarr; ${e.to}</span>
+        <span style="color:var(--dim)">${e.moves} moves · ${e.secs}s</span>
+      </div>`).join('')
+    : '<div style="color:var(--dim);text-align:center">no routes taught yet</div>';
+}
+
+// --- teach & repeat (legacy) ---
 $('#homebtn').onclick = async () => {
   const r = await (await fetch('/sethome',{method:'POST',body:'{}'})).json();
   $('#recmsg').textContent = r.msg || '';
@@ -514,6 +557,8 @@ setInterval(async ()=>{
       }
     }
     if (j.calib) renderCalib(j.calib);
+    if (j.cmap) renderCp(j.cmap);
+    if (j.nav && j.nav.state === 'driving') $('#cpmsg').textContent = j.nav.detail;
     if(j.auto){
       $('#autostat').textContent = j.auto.state;
       $('#autodetail').textContent = j.auto.detail || '';
@@ -564,16 +609,127 @@ class Deadman:
                     pass
 
 
+USER_HTML = """<!doctype html><html><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>FETCH - call the robot</title><style>
+:root{--bg:#0b0c10;--card:#14161d;--line:#242833;--dim:#8b93a7;--ok:#3ddc84;--warn:#ff9f43}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#e8ecf4;
+     font:15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:16px}
+h1{font-size:19px;margin:0 0 4px}
+p.sub{color:var(--dim);font-size:13px;margin:0 0 16px;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+      padding:16px;margin-bottom:14px}
+video{width:100%;border-radius:10px;background:#000;aspect-ratio:3/4;object-fit:cover}
+button{width:100%;height:56px;font-size:17px;font-weight:600;border:0;
+       border-radius:12px;background:#222634;color:#e8ecf4;margin-top:12px}
+button:disabled{opacity:.4}
+button.go{background:var(--ok);color:#04210f}
+#found{text-align:center;font-size:15px;margin-top:12px;min-height:22px}
+#msg{text-align:center;color:var(--dim);font-size:13px;min-height:18px;margin-top:8px}
+</style></head><body>
+<h1>Call the robot</h1>
+<p class=sub>Point your camera at the tag next to you. When it recognises
+which one you are standing at, send the robot over.</p>
+
+<div class=card>
+  <video id=v autoplay playsinline muted></video>
+  <div id=found>looking for a tag...</div>
+  <button id=call class=go disabled>call the robot</button>
+  <div id=msg></div>
+</div>
+<canvas id=c style="display:none"></canvas>
+<script>
+const v=document.getElementById('v'), c=document.getElementById('c');
+const found=document.getElementById('found'), call=document.getElementById('call');
+const msg=document.getElementById('msg');
+let tag=null, busy=false;
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})
+  .then(s=>{ v.srcObject=s; })
+  .catch(e=>{ found.textContent='camera blocked: '+e.message; });
+
+// Frames go to the Pi for detection - the phone needs no library at all.
+async function scan(){
+  if(busy || v.videoWidth===0) return;
+  busy=true;
+  try{
+    c.width=480; c.height=Math.round(480*v.videoHeight/v.videoWidth);
+    c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+    const img=c.toDataURL('image/jpeg',0.6);
+    const r=await (await fetch('/scan',{method:'POST',
+                    body:JSON.stringify({img})})).json();
+    if(r.ok){ tag=String(r.tag);
+      found.innerHTML='you are at <b>tag '+r.tag+'</b>';
+      found.style.color='var(--ok)'; call.disabled=false; }
+    else { tag=null; found.textContent=r.msg||'no tag in view';
+      found.style.color='var(--dim)'; call.disabled=true; }
+  }catch(e){}
+  busy=false;
+}
+setInterval(scan,700);
+
+call.onclick=async()=>{
+  if(tag===null) return;
+  const r=await (await fetch('/cp/go',{method:'POST',
+                  body:JSON.stringify({id:tag})})).json();
+  msg.textContent=r.msg||''; msg.style.color=r.ok?'var(--ok)':'var(--warn)';
+};
+setInterval(async()=>{
+  try{ const j=await (await fetch('/state')).json();
+    if(j.nav && j.nav.state==='driving') msg.textContent=j.nav.detail;
+    else if(j.nav && j.nav.state==='arrived') msg.textContent='robot has arrived';
+  }catch(e){}
+},1000);
+</script></body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     robot = None
     deadman = None
     vision = None
     tag_map = None
     paths = None
+    cmap = None
+    nav = None
     auto = None
 
     def log_message(self, *a):
         pass                                   # keep the console clean
+
+    def _detect_posted(self, data_url):
+        """Find an AprilTag in a frame the phone just sent.
+
+        Detection runs on the Pi so the phone needs no library - any browser
+        with a camera works, no install, no app.
+        """
+        if not data_url:
+            return None, "no image"
+        try:
+            import base64
+            import cv2
+            import numpy as np
+            from pupil_apriltags import Detector
+        except ImportError as e:
+            return None, f"detector unavailable: {e}"
+        try:
+            b64 = data_url.split(",", 1)[-1]
+            buf = np.frombuffer(base64.b64decode(b64), dtype=np.uint8)
+            img = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                return None, "could not decode image"
+            # One detector per process, not per frame - constructing it is the
+            # expensive part and the phone posts continuously.
+            if not hasattr(Handler, "_scan_det"):
+                Handler._scan_det = Detector(families="tag36h11", nthreads=2)
+            hits = Handler._scan_det.detect(img)
+            if not hits:
+                return None, "no tag in view"
+            best = max(hits, key=lambda d: cv2.contourArea(
+                d.corners.astype("float32")))
+            return int(best.tag_id), f"tag {int(best.tag_id)}"
+        except Exception as e:
+            return None, f"scan failed: {e}"
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
@@ -597,7 +753,18 @@ class Handler(BaseHTTPRequestHandler):
                 "calib": (self.tag_map.as_dict() if self.tag_map else {}),
                 "routes": (self.paths.as_dict() if self.paths else {}),
                 "home": (self.paths.home_set if self.paths else False),
+                "cmap": (self.cmap.as_dict() if self.cmap else None),
+                "nav": (self.nav.status() if self.nav else None),
             })
+
+        if self.path.startswith("/user"):
+            body = USER_HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
 
         if self.path.startswith("/snapshot.jpg"):
             jpg = self.vision.latest_jpeg() if (self.vision and self.vision.ok) else None
@@ -652,6 +819,9 @@ class Handler(BaseHTTPRequestHandler):
             data = {}
         p = self.path
         if p.startswith("/drive"):
+            # Touching the controls always wins over an autonomous trip.
+            if self.nav and self.nav.busy:
+                self.nav.abort()
             if self.auto and self.auto.busy:
                 self.auto.abort()      # a human taking the controls wins
             self.robot.drive(data.get("vx", 0), data.get("vy", 0), data.get("w", 0))
@@ -680,6 +850,38 @@ class Handler(BaseHTTPRequestHandler):
                     self.auto.abort()
                 else:
                     self.auto.go(int(tgt))
+        elif p.startswith("/scan"):
+            # The phone sends a frame; detection happens HERE so the phone
+            # needs no library and any browser works.
+            tid, msg = self._detect_posted(data.get("img", ""))
+            return self._json({"ok": tid is not None, "tag": tid, "msg": msg})
+        elif p.startswith("/cp/home"):
+            ok, msg = self.cmap.set_home() if self.cmap else (False, "no map")
+            if ok and self.robot:
+                self.robot.recorder = self.cmap     # record every manual move
+            return self._json({"ok": ok, "msg": msg,
+                               "cmap": self.cmap.as_dict() if self.cmap else None})
+        elif p.startswith("/cp/mark"):
+            ok, msg = (self.cmap.mark(data.get("id"), data.get("label"))
+                       if self.cmap else (False, "no map"))
+            return self._json({"ok": ok, "msg": msg,
+                               "cmap": self.cmap.as_dict() if self.cmap else None})
+        elif p.startswith("/cp/go"):
+            if self.nav:
+                ok, msg = self.nav.go(data.get("id"))
+            else:
+                ok, msg = False, "no navigator"
+            return self._json({"ok": ok, "msg": msg})
+        elif p.startswith("/cp/at"):
+            ok, msg = (self.cmap.set_current(data.get("id"))
+                       if self.cmap else (False, "no map"))
+            return self._json({"ok": ok, "msg": msg,
+                               "cmap": self.cmap.as_dict() if self.cmap else None})
+        elif p.startswith("/cp/forget"):
+            if self.cmap:
+                self.cmap.forget(data.get("id"))
+            return self._json({"ok": True,
+                               "cmap": self.cmap.as_dict() if self.cmap else None})
         elif p.startswith("/sethome"):
             ok, msg = (self.paths.set_home() if self.paths
                        else (False, "no path store"))
@@ -754,6 +956,9 @@ if __name__ == "__main__":
 
     Handler.tag_map = TagMap() if TagMap is not None else None
     Handler.paths = PathStore() if PathStore is not None else None
+    Handler.cmap = CheckpointMap() if CheckpointMap is not None else None
+    Handler.nav = (Navigator(Handler.robot, Handler.cmap)
+                   if Navigator is not None else None)
 
     if Autopilot is not None:
         Handler.auto = Autopilot(Handler.robot, Handler.vision,
