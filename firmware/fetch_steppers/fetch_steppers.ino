@@ -46,12 +46,16 @@ const float WHEEL_CIRC_M  = 0.0600 * M_PI;      // 60 mm wheels
 const float MAX_MS        = 0.30;               // m/s at 100 %
 const float MAX_SPS       = MAX_MS * (STEPS_PER_REV / WHEEL_CIRC_M);
 
-// crab circle: 2 ft radius. Lap time sets the speed (V = 2*pi*R / T), and
-// the vector is refreshed every 5 ms -> ~3200 updates per lap, so the path
-// is a continuous circle, not a polygon.
+// Crab circle, 2 ft radius.
+//   Peak wheel rate = amp*sqrt(2)*MAX_SPS and steppers STALL if commanded
+//   above what they can start at. Your original sketch proved 264 steps/s,
+//   so the lap time is chosen to land there. A shorter lap = faster = stall.
+//   amp is also capped at 1/sqrt(2) so setVel()'s normaliser never clips the
+//   sweep; clipping would flatten the fast quadrants into an oval.
 const float CIRCLE_RADIUS_M = 0.6096;           // 2 ft
-const float SECONDS_PER_LAP = 16.0;
-const int   CRAB_SLICE_MS   = 5;
+const float SECONDS_PER_LAP = 22.0;             // -> ~261 steps/s peak
+const float CRAB_RAMP_S     = 1.2;              // ease in/out, no stall on start
+const int   CRAB_SLICE_MS   = 5;                // 4400 vector updates per lap
 
 float curVX = 0, curVY = 0, curW = 0;
 int speedPct = 60;
@@ -78,17 +82,19 @@ void runAll() { for (int i = 0; i < 4; i++) M[i]->runSpeed(); }
 
 void crabCircle() {
   float V   = (2.0 * M_PI * CIRCLE_RADIUS_M) / SECONDS_PER_LAP;   // m/s
-  float amp = min(1.0f, (float)(V / MAX_MS));
+  float amp = min(V / MAX_MS, 0.7071f);          // cap: keep peak <= 1.0
   unsigned long t0 = micros();
   float lapUs = SECONDS_PER_LAP * 1e6;
   while ((float)(micros() - t0) < lapUs) {
-    // micros() keeps the angle smooth between refreshes; no quantised steps
-    float ang = 2.0 * M_PI * (float)(micros() - t0) / lapUs;
-    setVel(amp * sin(ang), amp * cos(ang), 0);   // body never rotates
+    float t   = (float)(micros() - t0) / 1e6;
+    float ang = 2.0 * M_PI * t / SECONDS_PER_LAP;
+    // ease in and out so the motors are never asked to start at full rate
+    float ramp = min(1.0f, min(t / CRAB_RAMP_S,
+                               (SECONDS_PER_LAP - t) / CRAB_RAMP_S));
+    setVel(amp * ramp * sin(ang), amp * ramp * cos(ang), 0);  // body stays put
     unsigned long slice = millis();
     while (millis() - slice < CRAB_SLICE_MS) { runAll(); yield(); }
-    // Do NOT consume the byte: break and let loop() parse it, so a STOP
-    // actually stops instead of being swallowed here.
+    // Don't consume the byte: break and let loop() parse it, so STOP works.
     if (Serial.available()) break;
   }
   setVel(0, 0, 0);
