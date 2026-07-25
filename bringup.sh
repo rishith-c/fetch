@@ -56,9 +56,15 @@ done
 
 # ---------- 3. make sure both services are running ----------
 ssh -o BatchMode=yes -o ConnectTimeout=20 pi '
-  for s in fetch-gui fetch-tunnel; do
-    systemctl --user is-active "$s" >/dev/null 2>&1 || systemctl --user restart "$s"
-  done
+  # If the tunnel is being (re)started, clear its log first. cloudflared
+  # APPENDS, so an old "Registered" line plus an old URL will happily satisfy
+  # the readiness check below while the new tunnel is still connecting, and
+  # you get handed a dead address that returns 530.
+  if ! systemctl --user is-active fetch-tunnel >/dev/null 2>&1; then
+    rm -f ~/cf.log
+    systemctl --user restart fetch-tunnel
+  fi
+  systemctl --user is-active fetch-gui >/dev/null 2>&1 || systemctl --user restart fetch-gui
   sleep 6
 ' 2>/dev/null
 
