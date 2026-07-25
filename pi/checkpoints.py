@@ -39,11 +39,11 @@ chain accumulates. Teaching checkpoints every couple of metres keeps each
 edge short, which is the whole reason to have a graph instead of one long
 route from home to everywhere.
 """
+import heapq
 import json
 import os
 import threading
 import time
-from collections import deque
 
 STORE = os.path.expanduser("~/checkpoints.json")
 
@@ -187,10 +187,17 @@ class CheckpointMap:
         return out
 
     def plan(self, target, frm=None):
-        """Shortest chain of segment-lists from `frm` to `target`.
+        """Quickest chain of segment-lists from `frm` to `target`.
 
-        Returns (legs, error). legs is a list of segment-lists to replay in
-        order; error is a human-readable reason when there is no route.
+        Cost is DRIVING SECONDS, not hop count. Counting hops picks a single
+        40 s edge over two 5 s ones, which is the wrong answer every time and
+        looks broken to anyone watching. Dijkstra on time fixes that.
+
+        It still only ever uses routes you actually drove: the robot has no
+        idea where nodes are in space, so it cannot invent a shortcut between
+        two checkpoints just because they happen to be near each other.
+
+        Returns (legs, error).
         """
         frm = frm or self.current
         target = str(target)
@@ -201,17 +208,23 @@ class CheckpointMap:
         if frm == target:
             return [], None                      # already there
 
-        # BFS: every edge counts the same, so this is the fewest hops.
         prev = {frm: None}
-        q = deque([frm])
-        while q:
-            cur = q.popleft()
+        best = {frm: 0.0}
+        pq = [(0.0, frm)]
+        seen = set()
+        while pq:
+            cost, cur = heapq.heappop(pq)
+            if cur in seen:
+                continue
+            seen.add(cur)
             if cur == target:
                 break
             for nxt, segs in self.neighbours(cur):
-                if nxt not in prev:
+                nc = cost + sum(s[3] for s in segs)      # seconds of driving
+                if nc < best.get(nxt, float("inf")):
+                    best[nxt] = nc
                     prev[nxt] = (cur, segs)
-                    q.append(nxt)
+                    heapq.heappush(pq, (nc, nxt))
         if target not in prev:
             return None, f"no taught route from {frm} to {target}"
 
