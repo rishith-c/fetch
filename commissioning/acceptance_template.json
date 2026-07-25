@@ -1,0 +1,78 @@
+{
+  "robot_id": null,
+  "test_date": null,
+  "tester": null,
+  "rails": {
+    "driver1_idle_v": null,
+    "driver1_worst_load_v": null,
+    "driver2_idle_v": null,
+    "driver2_worst_load_v": null,
+    "logic_v": null,
+    "uno_or_pi_resets": null
+  },
+  "battery": {
+    "resting_full_v": null,
+    "resting_after_run_v": null,
+    "max_sustained_a": null,
+    "fuse_3a_survived": null,
+    "runtime_min": null,
+    "battery_max_c": null,
+    "connectors_cool": null
+  },
+  "thermal": {
+    "hottest_l298_c": null,
+    "hottest_xl4015_c": null,
+    "motor_odor_or_shutdown": null
+  },
+  "sonar": {
+    "front_max_abs_error_cm": null,
+    "left_front_max_abs_error_cm": null,
+    "right_front_max_abs_error_cm": null,
+    "left_rear_max_abs_error_cm": null,
+    "right_rear_max_abs_error_cm": null,
+    "installed_crosstalk_pass": null,
+    "all_directional_stops_pass": null
+  },
+  "motion": {
+    "forward": null,
+    "backward": null,
+    "left_strafe": null,
+    "right_strafe": null,
+    "clockwise": null,
+    "counterclockwise": null,
+    "fixed_heading_circle": null
+  },
+  "vision_and_routes": {
+    "camera_width": null,
+    "camera_height": null,
+    "directed_edges_total": null,
+    "minimum_successful_runs_per_edge": null,
+    "all_edges_pass_in_demo_lighting": null
+  },
+  "failure_stops": {
+    "camera_cover_stop_s": null,
+    "uno_usb_disconnect_stop_s": null,
+    "phone_loss_stop_s": null,
+    "app_cancel_stop_s": null,
+    "obstacle_not_arrival": null
+  },
+  "arrival": {
+    "correct_tag_required": null,
+    "center_area_range_hold_required": null,
+    "wrong_checkpoint_rejected": null
+  },
+  "payload": {
+    "complete_robot_mass_g": null,
+    "traction_pass": null
+  },
+  "network": {
+    "private_network_used": null,
+    "full_route_coverage_pass": null,
+    "phone_and_pi_client_to_client_pass": null
+  },
+  "summons": {
+    "checkpoint_count": null,
+    "source_destination_pairs_tested": null,
+    "all_source_destination_pairs_pass": null
+  }
+}

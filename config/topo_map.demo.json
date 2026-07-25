@@ -1,0 +1,13 @@
+{
+  "_README": "DEMO ONLY. Replace these edges after testing the exact physical route in both directions.",
+  "names": {
+    "0": "START",
+    "1": "MIDPOINT",
+    "2": "DESTINATION"
+  },
+  "adj": {
+    "0": [1],
+    "1": [0, 2],
+    "2": [1]
+  }
+}
