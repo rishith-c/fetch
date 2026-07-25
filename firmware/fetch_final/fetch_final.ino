@@ -99,6 +99,12 @@ void pingOne(int i) {
 }
 
 void crabCircle() {
+  // The 'c' arrives as "c\n". Without this flush the trailing newline is
+  // still buffered, the abort check below sees it on the very first pass,
+  // and the circle cancels itself after one 5 ms slice -> a twitch.
+  delay(5);
+  while (Serial.available()) Serial.read();
+  Serial.println("crab start");
   float V   = (2.0 * M_PI * CIRCLE_RADIUS_M) / SECONDS_PER_LAP;   // m/s
   float amp = min(V / MAX_MS, 0.7071f);          // cap: keep peak <= 1.0
   unsigned long t0 = micros();
@@ -116,6 +122,7 @@ void crabCircle() {
     if (Serial.available()) break;
   }
   setVel(0, 0, 0);
+  Serial.println("crab done");
 }
 
 void handleLine() {
