@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare quick tunnel exposing the FETCH GUI
+After=network-online.target
+
+[Service]
+Type=simple
+# Quick tunnels mint a NEW random URL every start, so the log is the only
+# place the current address exists. Keep it somewhere predictable.
+ExecStart=/usr/bin/cloudflared tunnel --url http://localhost:8080 --no-autoupdate --logfile /home/varun/cf.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
