@@ -173,7 +173,7 @@ void setup() {
   float top = MAX_SPS * 1.6;
   for (int i = 0; i < 4; i++) { M[i]->setMaxSpeed(top); M[i]->setSpeed(0); }
   pinMode(TRIG, OUTPUT); digitalWrite(TRIG, LOW);
-  for (int i = 0; i < 5; i++) pinMode(ECHO[i], INPUT);
+  for (int i = 0; i < 5; i++) pinMode(ECHO[i], INPUT_PULLDOWN);  // unwired = 0, not noise
   tilt.attach(SERVO_PIN); tilt.write(90);
   Serial.println("FETCH FINAL READY");
 }
