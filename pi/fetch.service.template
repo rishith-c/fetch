@@ -1,0 +1,19 @@
+[Unit]
+Description=FETCH checkpoint navigation server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__FETCH_USER__
+WorkingDirectory=__FETCH_REPO__
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/fetch.env
+ExecStart=/usr/bin/python3 __FETCH_REPO__/pi/topo_server.py --map ${FETCH_MAP} --camera ${FETCH_CAMERA} --serial ${FETCH_SERIAL} --host 0.0.0.0 --port ${FETCH_PORT} --start-zone ${FETCH_START_ZONE}
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
