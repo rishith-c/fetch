@@ -39,6 +39,8 @@ def find_port():
 
 
 class Robot:
+    recorder = None          # set to a PathStore while teaching
+
     def __init__(self, port=None, baud=BAUD):
         self.port = port or find_port()
         self.ser = serial.Serial(self.port, baud, timeout=0.1)
@@ -95,11 +97,18 @@ class Robot:
 
     # ---------- commands ----------
     def drive(self, vx, vy=0, w=0):
+        # Teaching taps here, not _send: _send also carries the 100 ms
+        # keepalive repeats, and recording those would bloat the route with
+        # hundreds of identical segments.
+        if self.recorder is not None:
+            self.recorder.note(vx, vy, w)
         """vx forward, vy right, w clockwise. Each -100..100."""
         self._vel = (vx, vy, w)
         self._send(f"v {vx:.0f} {vy:.0f} {w:.0f}")
 
     def stop(self):
+        if self.recorder is not None:
+            self.recorder.note(0, 0, 0)
         """Emergency stop. Sent twice: the first byte breaks any routine
         running on the Uno (crab circle), the second is parsed as the stop
         command itself."""

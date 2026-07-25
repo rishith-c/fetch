@@ -44,16 +44,24 @@ LOST_GRACE = 1.5              # s of not seeing the tag before re-searching
 DEFAULT_TIMEOUT = 90.0
 
 
+ACTIVE_STATES = ("replaying", "searching", "approaching")
+
+
 class Autopilot:
-    def __init__(self, robot, vision, tilt_sweep=None, tag_map=None):
+    def __init__(self, robot, vision, tilt_sweep=None, tag_map=None,
+                 path_store=None):
         self.robot = robot
         self.vision = vision
-        self.tilt = tilt_sweep
+        self.tilt = tilt_sweep          # kept None now the servo is gone
         # Calibrated arrival signatures. Without one we fall back to
         # AREA_ARRIVED, which is a guess at "about 0.6 m from a 140 mm tag";
         # with one the robot stops exactly where you parked it during
         # calibration, which is the whole point of the feature.
         self.tag_map = tag_map
+        # Taught routes. With one, a run is REPLAY then visual servo; without
+        # one it falls back to sweep-and-search, which only works if the tag
+        # happens to be visible from the start.
+        self.paths = path_store
         self.state = "idle"
         self.target = None
         self.detail = ""
@@ -76,23 +84,63 @@ class Autopilot:
             self._stop.set()
             self._thread.join(timeout=2.0)
         self._stop.set()
-        if self.state in ("searching", "approaching"):
+        if self.state in ACTIVE_STATES:
             self.state = "aborted"
             self.detail = "stopped"
 
     @property
     def busy(self):
-        return self.state in ("searching", "approaching")
+        return self.state in ACTIVE_STATES
 
     def status(self):
         return {"state": self.state, "target": self.target,
                 "detail": self.detail}
 
     # ---------- the loop ----------
+    def _replay(self):
+        """Drive the taught route open-loop. Returns False if aborted.
+
+        Sonar still interrupts: an obstacle that was not there during
+        teaching must not be driven through just because the recording says
+        forward. On a block we pause, let it clear, and resume the SAME
+        segment rather than skipping it - skipping would shorten the path
+        and land short.
+        """
+        route = self.paths.route(self.target) if self.paths else None
+        if not route:
+            return True                      # nothing taught; go straight to vision
+        self.state = "replaying"
+        total = sum(s[3] for s in route)
+        done = 0.0
+        for vx, vy, w, dt in route:
+            if self._stop.is_set():
+                return False
+            self.detail = f"replaying route: {int(100 * done / total)}%"
+            end = time.time() + dt
+            while time.time() < end:
+                if self._stop.is_set():
+                    return False
+                f = self.robot.sensors.get("f", 0)
+                # 0 means no echo (or unplugged) - never treat that as an
+                # obstacle, or a dead sensor would freeze every replay.
+                blocked = vx > 0 and 3 <= f < 25
+                if blocked:
+                    self.robot.stop()
+                    self.detail = f"paused: something at {f} cm"
+                    end += 0.1               # give the time back, do not skip
+                else:
+                    self.robot.drive(vx, vy, w)
+                time.sleep(0.05)
+            done += dt
+        self.robot.stop()
+        return True
+
     def _run(self, timeout):
         t0 = time.time()
         last_seen = 0.0
         try:
+            if not self._replay():
+                return
             while not self._stop.is_set():
                 if time.time() - t0 > timeout:
                     self.state, self.detail = "aborted", "timed out"
@@ -121,7 +169,7 @@ class Autopilot:
                 time.sleep(0.1)
         finally:
             self.robot.stop()
-            if self.state in ("searching", "approaching"):
+            if self.state in ACTIVE_STATES:
                 self.state = "aborted"
 
     def _goal(self):

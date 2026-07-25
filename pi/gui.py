@@ -30,6 +30,7 @@ except ImportError:
 try:
     from autopilot import Autopilot, TiltSweep
     from tag_map import TagMap
+    from path_store import PathStore
 except Exception as _e:
     Autopilot = TiltSweep = None
     print(f"[gui] autopilot unavailable: {_e}")
@@ -46,7 +47,7 @@ class FakeRobot:
     port = "FAKE"
 
     def __init__(self):
-        self.sensors = {k: 0 for k in ("f", "lf", "rf", "lr", "rr")}
+        self.sensors = {k: 0 for k in ("f", "lf", "rf")}
         self._vel = (0, 0, 0)
 
     def drive(self, vx, vy=0, w=0):
@@ -115,7 +116,7 @@ PAGE = r"""<!doctype html>
            text-transform:uppercase;font-weight:600}
   input[type=range]{width:100%;accent-color:var(--acc)}
   .val{float:right;font:12px ui-monospace,monospace;color:var(--acc)}
-  .sensors{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;text-align:center}
+  .sensors{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;text-align:center}
   .sensors div{background:#11131a;border:1px solid var(--line);border-radius:8px;
                padding:8px 2px 6px;transition:border-color .15s}
   .sensors b{display:block;font:17px ui-monospace,monospace;line-height:1.1;
@@ -210,8 +211,29 @@ PAGE = r"""<!doctype html>
 </div>
 
 <div class="card">
-  <h2>Camera tilt <span class="val" id="tiltv">90°</span></h2>
-  <input type="range" id="tilt" min="0" max="180" step="5" value="90">
+  <h2>Teach a route</h2>
+  <button id="homebtn" style="width:100%;height:48px;font-size:15px">
+    Set HOME (robot is on the start spot)</button>
+  <div id="homest" style="text-align:center;font-size:12px;margin:8px 0;
+       color:var(--dim)">home not set</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+    <button class="recbtn" data-t="0" style="height:44px">rec 0</button>
+    <button class="recbtn" data-t="1" style="height:44px">rec 1</button>
+    <button class="recbtn" data-t="2" style="height:44px">rec 2</button>
+    <button class="recbtn" data-t="3" style="height:44px">rec 3</button>
+    <button class="recbtn" data-t="4" style="height:44px">rec 4</button>
+  </div>
+  <button id="recstop" style="width:100%;height:48px;font-size:15px;
+          margin-top:8px;display:none;background:var(--warn)">
+    STOP recording &amp; save</button>
+  <div id="recmsg" style="text-align:center;font-size:12px;min-height:16px;
+       margin-top:6px;color:var(--dim)"></div>
+  <div id="reclist" style="font-size:12px;margin-top:8px"></div>
+  <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">
+    Put the robot on HOME, press Set HOME, then press rec N and drive to
+    art piece N by hand. Turn to face its tag, calibrate it above, then
+    STOP recording. "Go to N" replays that route and the tag corrects the
+    last stretch.</div>
 </div>
 
 <div class="card">
@@ -231,8 +253,6 @@ PAGE = r"""<!doctype html>
     <div id="c_lf"><b id="s_lf">—</b><span>L-FRT</span><div class="bar"><i id="b_lf"></i></div></div>
     <div id="c_f"><b id="s_f">—</b><span>FRONT</span><div class="bar"><i id="b_f"></i></div></div>
     <div id="c_rf"><b id="s_rf">—</b><span>R-FRT</span><div class="bar"><i id="b_rf"></i></div></div>
-    <div id="c_lr"><b id="s_lr">—</b><span>L-REAR</span><div class="bar"><i id="b_lr"></i></div></div>
-    <div id="c_rr"><b id="s_rr">—</b><span>R-REAR</span><div class="bar"><i id="b_rr"></i></div></div>
   </div>
   <div class="guardrow">
     <small style="color:var(--dim);font-size:11.5px">Obstacle avoidance blocks
@@ -329,8 +349,38 @@ $('#rate').oninput = e => {
   clearTimeout(rateT);                       // don't spam the serial link
   rateT = setTimeout(()=> post('/rate', {sps:+e.target.value}), 120);
 };
-$('#tilt').oninput = e => { $('#tiltv').textContent = e.target.value + '°';
-                            post('/tilt', {deg:+e.target.value}); };
+// --- teach & repeat ---
+$('#homebtn').onclick = async () => {
+  const r = await (await fetch('/sethome',{method:'POST',body:'{}'})).json();
+  $('#recmsg').textContent = r.msg || '';
+  $('#recmsg').style.color = 'var(--ok)';
+};
+document.querySelectorAll('.recbtn').forEach(b=>{
+  b.onclick = async () => {
+    const r = await (await fetch('/record',{method:'POST',
+                      body:JSON.stringify({id:+b.dataset.t})})).json();
+    $('#recmsg').textContent = r.msg || '';
+    $('#recmsg').style.color = r.ok ? 'var(--ok)' : 'var(--warn)';
+    if (r.ok) $('#recstop').style.display = 'block';
+  };
+});
+$('#recstop').onclick = async () => {
+  const r = await (await fetch('/recstop',{method:'POST',body:'{}'})).json();
+  $('#recmsg').textContent = r.msg || '';
+  $('#recmsg').style.color = r.ok ? 'var(--ok)' : 'var(--warn)';
+  $('#recstop').style.display = 'none';
+  if (r.routes) renderRoutes(r.routes);
+};
+function renderRoutes(rt){
+  const ids = Object.keys(rt).sort();
+  $('#reclist').innerHTML = ids.length
+    ? ids.map(i=>`<div style="display:flex;justify-content:space-between;
+        padding:4px 0;border-top:1px solid var(--line)">
+        <span>route to ${i}</span>
+        <span style="color:var(--dim)">${rt[i].moves} moves · ${rt[i].secs}s</span>
+      </div>`).join('')
+    : '<div style="color:var(--dim);text-align:center">no routes taught yet</div>';
+}
 
 // --- keyboard ---
 const KEYS = {w:[100,0,0], s:[-100,0,0], a:[0,-100,0], d:[0,100,0],
@@ -519,6 +569,7 @@ class Handler(BaseHTTPRequestHandler):
     deadman = None
     vision = None
     tag_map = None
+    paths = None
     auto = None
 
     def log_message(self, *a):
@@ -544,6 +595,8 @@ class Handler(BaseHTTPRequestHandler):
                 "zones": (v.zones if (v and v.fresh) else None),
                 "auto": (self.auto.status() if self.auto else None),
                 "calib": (self.tag_map.as_dict() if self.tag_map else {}),
+                "routes": (self.paths.as_dict() if self.paths else {}),
+                "home": (self.paths.home_set if self.paths else False),
             })
 
         if self.path.startswith("/snapshot.jpg"):
@@ -627,6 +680,22 @@ class Handler(BaseHTTPRequestHandler):
                     self.auto.abort()
                 else:
                     self.auto.go(int(tgt))
+        elif p.startswith("/sethome"):
+            ok, msg = (self.paths.set_home() if self.paths
+                       else (False, "no path store"))
+            return self._json({"ok": ok, "msg": msg})
+        elif p.startswith("/record"):
+            ok, msg = (self.paths.start_recording(int(data.get("id", -1)))
+                       if self.paths else (False, "no path store"))
+            if ok:
+                self.robot.recorder = self.paths      # arm the drive() tap
+            return self._json({"ok": ok, "msg": msg})
+        elif p.startswith("/recstop"):
+            ok, msg = (self.paths.stop_recording() if self.paths
+                       else (False, "no path store"))
+            self.robot.recorder = None
+            return self._json({"ok": ok, "msg": msg,
+                               "routes": self.paths.as_dict() if self.paths else {}})
         elif p.startswith("/calibrate"):
             # Snapshot the CURRENT view of whatever tag is visible. The tilt
             # goes in too, so a tag mounted high is re-found at the same angle.
@@ -684,11 +753,13 @@ if __name__ == "__main__":
         Handler.vision.start()
 
     Handler.tag_map = TagMap() if TagMap is not None else None
+    Handler.paths = PathStore() if PathStore is not None else None
 
     if Autopilot is not None:
         Handler.auto = Autopilot(Handler.robot, Handler.vision,
                                  TiltSweep(Handler.robot),
-                                 tag_map=Handler.tag_map)
+                                 tag_map=Handler.tag_map,
+                                 path_store=Handler.paths)
 
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"\n  open  http://{my_ip()}:{args.port}   (ctrl-C to quit)\n")

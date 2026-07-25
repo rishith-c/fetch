@@ -1,5 +1,5 @@
 /*
- * FETCH FINAL — everything: 4 steppers + 5 sonars + MG90S tilt servo + Pi.
+ * FETCH FINAL — 4 steppers + 3 front sonars + fixed camera + Pi.
  *
  * MOTORS: identical to fetch_steppers (the user's proven wiring/kinematics).
  *   FL = X (2,5)  FR = Y (3,6)  RL = Z (4,7) POL -1  RR = A (12,A0)  EN 8
@@ -12,14 +12,14 @@
  *     ECHO front       D10 (Y+ endstop)   ECHO left-front  A1 (Hold)
  *     ECHO right-front A2  (Resume)
  *     (rear pair removed - A3/A4 are free again)
- * SERVO: signal D11 (Z+ endstop). Power from the BUCK at 5 V, never the Uno.
- * SPARE: D13, A3, A4, A5, D0, D1
+ * SERVO: REMOVED. Camera is fixed-mount; D11 is free.
+ * SPARE: D11, D13, A3, A4, A5, D0, D1
  *
  * SERIAL 115200
  *   v <vx> <vy> <w>   -100..100 each   vx fwd, vy right, w clockwise
  *   f b l r q e s     manual keys       + -   speed step
  *   m <corner> <spd>  one motor: 0=FL 1=FR 2=RL 3=RR
- *   t <0-180>         camera tilt
+ *   t <n>             accepted, ignored (servo removed)
  *   c                 crab circle (~30 cm)      ?  report state
  *   OUT: "us f=52 lf=110 rf=0"  cm, 0 = no echo, ~11 Hz with 3 sensors
  *
@@ -28,7 +28,6 @@
  *   - forward motion refused under 25 cm front clearance
  */
 #include <AccelStepper.h>
-#include <Servo.h>
 #include <math.h>
 
 AccelStepper FL(AccelStepper::DRIVER, 2, 5);    // X  top-left
@@ -98,8 +97,6 @@ int median3(int a, int b, int c) {
   return b;
 }
 
-const int SERVO_PIN = 11;
-Servo tilt;
 
 float curVX = 0, curVY = 0, curW = 0;
 int speedPct = 60;
@@ -188,7 +185,8 @@ void handleLine() {
     setVel(v[0] / 100.0f, v[1] / 100.0f, v[2] / 100.0f);
     vMode = true; lastV = millis();
   } else if (c == 't') {
-    tilt.write(constrain((int)strtol(line + 1, NULL, 10), 0, 180));
+    // Servo removed - the camera is bolted at a fixed angle now. The command
+    // is still accepted so an older Pi build cannot wedge on an unknown key.
   } else if (c == 'k') {
     // k <steps/s> : set the full-scale wheel rate. Higher = faster, and the
     // noise changes sharply with it - sweep to find the quiet band.
@@ -245,7 +243,6 @@ void setup() {
   }
   pinMode(TRIG, OUTPUT); digitalWrite(TRIG, LOW);
   for (int i = 0; i < NUS; i++) pinMode(ECHO[i], INPUT_PULLDOWN);  // unwired = 0, not noise
-  tilt.attach(SERVO_PIN); tilt.write(90);
   Serial.println("FETCH FINAL READY");
 }
 
