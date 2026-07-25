@@ -1,138 +1,146 @@
 # FETCH
 
-FETCH is a hackathon-scale autonomous mecanum robot. A user scans the QR code at the wall checkpoint nearest them, taps **Call FETCH**, and the robot follows a pre-mapped checkpoint graph while its forward camera reads AprilTags. Five ultrasonic sensors stop motion around obstacles.
+A four wheel mecanum robot that carries a trash can around an art gallery. You
+teach it where the art pieces are by driving it there once. After that it
+returns to any of them on its own, and visitors can call it over by pointing a
+phone at the AprilTag next to them.
 
-This repository contains the final checkpoint-navigation build. Older TF-Luna, BLE/UWB homing, phone-sees-robot, compass, battery-monitor, and coordinate-SLAM designs are not part of this configuration.
+It runs with no encoders, no IMU, no lidar, and no map of the room.
 
-> This is a controlled-demo prototype, not a certified public-space autonomous system. The software and static engineering checks pass, but the physical commissioning and 20-minute rehearsal in the build manual are mandatory.
+![assembly](docs/img/fetch_v2_assembly.png)
 
-## Start here
+## How it navigates without odometry
 
-- [Final build manual](docs/FINAL_BUILD_MANUAL.md) — exact parts, wiring, Vref setup, commissioning, and steps 1–106
-- [JK42HS40-1704-13A motor audit](docs/JK42HS40-1704-13A.md) — manufacturer specifications and current-limit values
-- `./verify_all.sh` — firmware, Pi, iOS, wiring, navigation, CAD, and marker checks
+The robot cannot know its position in the room. Wheel step counts would drift
+immediately because mecanum wheels slip sideways as part of how they work.
 
-## How it works
+Instead it stores a graph of places and the driving between them.
 
-```mermaid
-flowchart LR
-    U["User scans nearby QR"] --> A["iPhone: Call FETCH"]
-    A -->|"destination marker ID over Wi-Fi"| P["Raspberry Pi 4B"]
-    C["Forward USB camera"] -->|"AprilTag observations"| P
-    P -->|"route graph + visual steering"| S["USB serial"]
-    S --> R["Uno R4 + CNC Shield V3"]
-    R --> D["4 × A4988 + 4 × motors"]
-    H["5 × HC-SR04"] -->|"local stop veto"| R
+```
+home ──teach──> tag 0 ──teach──> tag 1 ──teach──> tag 2
+     <──────────        <──────────       <──────────
 ```
 
-The phone does not need to see the robot. The QR identifies the user's destination. The robot already knows which checkpoint it starts at, computes a path through `topo_map.json`, and keeps visually steering toward the next AprilTag until it reaches the requested checkpoint.
+Nodes are places. Edges are the exact commands given while driving there,
+recorded as `(vx, vy, w, dt)`. Pressing "mark 0" saves everything driven since
+the last mark as the edge into node 0.
 
-## Final hardware
+Edges work in both directions. Driving an edge backwards means replaying its
+segments in reverse order with every velocity negated. This is a true inverse
+because the robot is holonomic, and the net displacement of forward plus
+backward is exactly zero. A car could not do this.
 
-- Raspberry Pi 4B, microSD, and forward-facing UVC USB webcam
-- Arduino Uno R4 and CNC Shield V3.00
-- 4 × A4988 with heatsinks and a cooling fan
-- 4 × JK42HS40-1704-13A NEMA 17 motors
-- 4 × 80 mm mecanum wheels
-- 5 × HC-SR04 ultrasonic sensors
-- One 11.1 V 2000 mAh SM2P battery installed; the second pack is a disconnected spare
-- 7.5 A ATC/ATO inline fuse, master switch, 5.1 V/5 A buck, and 470 µF/25 V motor-rail capacitor
-- QR/AprilTag checkpoint posters: `markers/fetch_CHECKPOINTS_PRINT_ME.pdf`
+Routing uses Dijkstra weighted by recorded driving seconds rather than hop
+count. Counting hops would pick one 40 second edge over two 5 second edges.
 
-No TF-Luna, logic-level shifter, BNO08x, or battery monitor is required.
+## Two web interfaces
 
-## Authoritative wiring
+Both are served by one Python process on the Pi over a Cloudflare tunnel, so
+they work on any network including venue WiFi that blocks device to device
+traffic.
 
-### Power
+**Operator page.** Drive with on screen controls or arrow keys. Set home, mark
+checkpoints, send the robot to any of them. Live sonar readings, camera feed,
+and a motor rate slider for tuning stepper resonance.
 
-```text
-Battery + -> 7.5 A fuse (within 10 cm) -> master switch -> positive distribution
-Battery - ----------------------------------------------> ground distribution
+**User page at `/user`.** A visitor opens it on a phone, points the camera at an
+AprilTag, and the page reports which art piece they are standing at. One button
+sends the robot from wherever it is to them. Tag detection runs on the Pi, so
+the phone needs no app and no install.
 
-Positive/ground distribution -> CNC Shield motor + / -
-Positive/ground distribution -> 5.1 V/5 A buck -> Raspberry Pi USB-C
-Raspberry Pi USB-A -> data-capable USB cable -> Uno R4 USB-C
-470 uF/25 V capacitor -> across CNC motor input, correct polarity
+## Hardware
+
+| Part | Detail |
+|---|---|
+| Compute | Raspberry Pi 4, own 5 V power bank |
+| Motion | Arduino Uno R4 WiFi, CNC Shield V3, 4x A4988 |
+| Motors | 4x NEMA 17 with 60 mm mecanum wheels |
+| Sensing | USB webcam, 3x HC-SR04 front facing |
+| Power | 3S LiPo for motors, switched separately from the Pi |
+
+Motor pin map:
+
+| Corner | Socket | Step | Dir | Polarity |
+|---|---|---|---|---|
+| Front left | X | D2 | D5 | +1 |
+| Front right | Y | D3 | D6 | +1 |
+| Rear left | Z | D4 | D7 | -1 |
+| Rear right | A | D12 | A0 | +1 |
+
+Rear right takes its direction signal from A0 on a jumper.
+
+## Safety
+
+Ordered by precedence. The two firmware guards keep working if WiFi, the
+tunnel, or the Pi goes away mid run.
+
+1. STOP button in the GUI
+2. Touching manual controls cancels any autonomous trip
+3. 500 ms communication watchdog, in firmware
+4. Forward motion refused under 25 cm front clearance, in firmware
+5. Obstacle pause during route replay, which resumes rather than skipping
+
+A sonar reading of `0` means no echo, not an obstacle. Both the firmware veto
+and the replay loop require a reading that is close and plausible, at least
+3 cm, so an unplugged sensor cannot freeze a run.
+
+## Layout
+
+```
+firmware/fetch_final/   Arduino sketch: kinematics, sonar, safety
+pi/gui.py               web server, both pages, all endpoints
+pi/checkpoints.py       the place graph, teaching, Dijkstra routing
+pi/navigator.py         replays a planned chain of edges
+pi/drive.py             serial to the Uno, keepalive, auto reconnect
+pi/fetch_auto.py        camera and AprilTag detection
+markers/                printable tag36h11 tags 0 to 4
+cad/                    STEP and STL for every printed part
+bringup.sh              start everything and print both URLs
 ```
 
-Use a mating SM2P pigtail instead of cutting the battery lead when possible. Never connect both battery packs together. Leave the shield's motor-supply-to-Arduino jumper off.
+## Serial protocol
 
-### Motors and drivers
+The Uno accepts single line commands at 115200 baud.
 
-| CNC socket | Shield pins | Motor position |
-|---|---|---|
-| X | D2 step / D5 direction | Front-left |
-| Y | D3 step / D6 direction | Front-right |
-| Z | D4 step / D7 direction | Rear-left |
-| A | D12 step / D13 direction | Rear-right |
-
-Set the A socket to independent D12/D13, not clone mode. Install MS1 and MS2 and leave MS3 open on all four axes for 1/4 microstepping. With motors unplugged, set Vref from the actual sense-resistor marking:
-
-| Driver marking | Vref for 1.275 A target |
-|---|---:|
-| R050 | 0.510 V |
-| R100 | 1.020 V |
-
-Stop if the marking is unreadable or R200; do not guess.
-
-### Ultrasonic sensors
-
-All sensor VCC leads go to the shield 5 V rail and all grounds go to shield GND. End-stop headers provide signal and ground, not sensor VCC.
-
-| Sensor | Direction | TRIG | ECHO |
-|---|---:|---|---|
-| US1 | 0° front | D9 | D10 |
-| US2 | 75° left-front | D11 | A0 |
-| US3 | 145° left-rear | A1 | A2 |
-| US4 | 215° right-rear | A3 | D0 |
-| US5 | 285° right-front | D1 | A4 |
-
-Leave A5 unconnected. D0/D1 cannot be used for other serial hardware in this build; Pi-to-Uno communication uses USB.
-
-## Software layout
-
-```text
-firmware/fetch_drive/       Uno drive control, sonar veto, watchdog
-pi/topo_server.py           Camera + route server used by checkpoint mode
-pi/topo_nav.py              Route graph and visual steering policy
-ios/FetchCheckpoint.swift   Scan/checkpoint/call iPhone interface
-markers/                    Final printable QR + AprilTag checkpoint posters
-cad/                        Robot enclosure and sensor-pod models
-sim/verify.py               Engineering invariants
-tools/                      Wiring, motor, marker, and manual audits
+```
+v <vx> <vy> <w>   velocity, -100 to 100 each
+m <corner> <spd>  drive one motor, 0=FL 1=FR 2=RL 3=RR
+k <steps/s>       full scale wheel rate, for tuning noise
+g <0|1>           disarm or arm the front veto
+s                 stop
+?                 report state
 ```
 
-## Verify and run
+It reports `us f=52 lf=110 rf=0` at about 11 Hz, in centimetres.
+
+## Running it
 
 ```bash
-./verify_all.sh
-
-python3 tools/make_topo_map.py \
-  --edges 0-1,1-2,2-3 \
-  --output topo_map.json
-
-python3 pi/topo_nav.py --map topo_map.json --check
-
-python3 pi/topo_server.py \
-  --map topo_map.json \
-  --camera 0 \
-  --serial /dev/ttyACM0 \
-  --start-zone 0
+./bringup.sh
 ```
 
-Set `PI_BASE` in `ios/FetchCheckpoint.swift` to the Pi's LAN address, keep the iPhone and Pi on the same Wi-Fi, and physically place the robot at the declared start zone. Follow the full manual before any floor run.
+Starts the tunnel, waits for the Pi, verifies both pages return 200, and prints
+the URLs. Services on the Pi start themselves at boot.
 
-## Fixed operating limits
+## Printed parts
 
-| Setting | Value |
-|---|---:|
-| Firmware speed ceiling | 250 mm/s |
-| Automatic approach | 200 mm/s |
-| Slew | 500 mm/s² |
-| Front stop | 60 cm |
-| Checkpoint arrival | 65 cm |
-| Side/rear stop | 35 cm |
-| Rotation stop | 20 cm |
-| Command watchdog | 500 ms |
+| | | |
+|---|---|---|
+| ![deck](docs/img/fetch_deck.png) | ![box](docs/img/fetch_box.png) | ![pod](docs/img/fetch_sensorpod.png) |
+| Deck | Trash can box | Sensor pod |
+| ![crown](docs/img/can_crown.png) | ![legs](docs/img/crown_legs.png) | ![coupler](docs/img/shaft_coupler_hex.png) |
+| Can crown | Crown legs | 5 mm to hex shaft coupler |
 
-The go/no-go rule is simple: do not run for judges until all four motors, all five ultrasonic sensors, every camera route edge, cancellation, Wi-Fi loss, obstacle stops, the master switch, and a full 20-minute battery rehearsal have passed.
+## Known limits
+
+The robot's belief about its own position is not measured. It updates only when
+a trip completes, so an aborted trip never claims an arrival, but carrying the
+robot by hand makes the belief stale. Press Set HOME to correct it.
+
+Replay is open loop, so each edge adds a few percent of distance error plus
+heading drift, and it compounds along a chain. Teaching checkpoints every couple
+of metres keeps each edge short.
+
+The robot has no spatial model, so it cannot invent a shortcut between two
+checkpoints that happen to be near each other. Drive that edge once and it
+becomes available in both directions.

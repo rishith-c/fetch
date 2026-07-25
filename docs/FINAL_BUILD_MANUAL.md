@@ -1,176 +1,269 @@
----
-tags: [final, manual, wiring, hackathon, critical]
----
-# FINAL BUILD MANUAL
+# FETCH final build and commissioning manual
 
-This is the single authoritative FETCH hackathon build. Do not combine it with older TF-Luna, phone-tracking, BLE, UWB, BNO08x or mall-production pages.
+**Baseline:** Hiwonder TT-motor mecanum chassis, Uno R4, two L298N modules, two
+XL4015 converters, five HC-SR04 sensors, Pi 4 + USB camera, iPhone checkpoint
+app, and HomeJoy 11.1 V 2000 mAh Li-ion battery.
 
-## Final configuration
+This is the only final build described here. Do not mix in the archived CNC
+Shield, A4988, NEMA, L293D, TF-Luna, servo, or battery-monitor designs.
 
-- Four [JK42HS40-1704-13A](JK42HS40-1704-13A.md) motors
-- Four 80mm mecanum wheels
-- Arduino Uno R4 + CNC Shield V3.00
-- Four A4988 drivers at 1/4 microstepping and 1.275A target
-- Five HC-SR04 sensors; no TF-Luna and no level shifter
-- Raspberry Pi 4B + forward UVC USB webcam
-- One 11.1V 2000mAh SM2P battery installed; second identical pack disconnected as spare
-- 7.5A ATC/ATO fuse, DC master switch, 5.1V/5A buck and 470µF/25V motor-rail capacitor
-- QR/AprilTag checkpoint posters and topological route graph
+## What the completed demo does
+
+The person scans the QR on the nearest checkpoint and presses **CALL FETCH**.
+The phone sends `zone=<id>` to the Pi. The robot can begin out of sight. It
+localizes from a visible AprilTag, finds a route through a strongly connected
+directed checkpoint graph, then visually approaches each next tag. The Uno
+stops locally when ultrasonic clearance is unsafe. The last AprilTag, centered
+and held at the expected sonar range, is the arrival proof.
+
+The robot comes to the **scanned checkpoint**, not to an arbitrary unmarked
+person. The app must remain open while it travels; losing the phone heartbeat
+causes a stop. Use this only on a supervised, taped-off demo route.
 
 ## Required parts
 
-1. Raspberry Pi 4B and microSD card
-2. UVC USB webcam
-3. Arduino Uno R4
-4. CNC Shield V3.00
-5. Four A4988 modules
-6. Four A4988 heatsinks
-7. One 5V cooling fan aimed across all drivers
-8. Four JK42HS40-1704-13A motors
-9. Four 80mm mecanum wheels
-10. Five HC-SR04 sensors
-11. Two-pack 11.1V 2000mAh battery kit and its exact charger
-12. Matching SM2P pigtail; do not cut the battery pack if a mating connector is available
-13. ATC/ATO inline fuse holder and 7.5A fuse
-14. DC master switch rated at least 15V/10A
-15. 5.1V/5A regulated buck accepting 9–12.6V input
-16. 470µF electrolytic capacitor rated at least 25V
-17. Positive and ground distribution blocks
-18. 18AWG power wire for short main-power extensions
-19. 22AWG wire for sensors
-20. Crimp connectors sized for each joined wire, bootlace ferrules, heat-shrink and strain relief
-21. Data-capable USB-A to USB-C cable for Pi-to-Uno
-22. Chassis, bin and fasteners
-23. Printed checkpoint posters on rigid matte backing
+1. Obtain one Hiwonder 180 × 140 × 89 mm mecanum chassis kit with four 3–6 V, 1:120 TT brushed motors and four 66 mm mecanum wheels.
+2. Obtain one Arduino Uno R4 Minima.
+3. Obtain exactly two standard L298N dual H-bridge modules.
+4. Obtain one HiLetgo three-pack of adjustable XL4015 modules; install two and keep the third as a spare.
+5. Obtain five genuine-working HC-SR04 modules.
+6. Obtain one Raspberry Pi 4 and one forward-facing UVC USB camera.
+7. Obtain one dedicated 5.1 V / 3 A Pi power bank and a short suitable cable.
+8. Use one HomeJoy 11.1 V 2000 mAh Li-ion pack at a time and only its matching 3S charger.
+9. Obtain one inline ATC/ATO blade-fuse holder and 3 A fuses.
+10. Obtain one latching master power switch rated for at least 12.6 V DC and 5 A DC.
+11. Obtain two 470 µF electrolytic capacitors rated at least 16 V.
+12. Use short 18–20 AWG stranded copper for battery and motor-power branches, 22 AWG for motors, and 24–26 AWG for logic/sensors.
+13. Use proper crimp splices or solder plus heat-shrink, insulated ferrules for screw terminals, cable ties, and strain relief.
+14. Obtain a digital multimeter; a DC clamp meter or inline wattmeter is strongly recommended for commissioning.
+15. Print the generated A4 checkpoint posters at 100% scale on matte paper and mount them rigidly.
 
-## Numbered build procedure
+## Reject incompatible substitutions
 
-1. Run `cd ~/Developer/fetch && ./verify_all.sh`; do not build from a failing revision.
-2. Keep both batteries and the charger disconnected.
-3. Measure the wheel diameter. Continue only if it is 80mm; otherwise update `WHEEL_DIA_MM` and rerun verification.
-4. Mount the four JK42HS40 motors: front-left, front-right, rear-left and rear-right.
-5. Mount all motor axles parallel.
-6. Install the mecanum wheels in an X pattern when viewed from above.
-7. Spin every wheel by hand and remove rubbing or binding.
-8. Mount the Uno R4 where its USB-C connector remains reachable.
-9. Seat the CNC Shield squarely on the Uno without offset or bent pins.
-10. Leave the shield's motor-supply-to-Arduino power jumper off.
-11. Install MS1 and MS2 jumpers under X, Y, Z and A.
-12. Leave MS3 open under X, Y, Z and A.
-13. Configure the A socket for independent D12/D13; do not clone X, Y or Z.
-14. Identify the orientation of each A4988 from the actual shield labels.
-15. Identify the two current-sense resistors on each A4988: R050, R100 or R200.
-16. Stop if any driver is marked R200 or if markings cannot be read.
-17. Insert all four A4988 modules with identical, correct orientation.
-18. Attach one heatsink to each A4988 without shorting pins.
-19. Mount the cooling fan so air crosses all four heatsinks.
-20. Leave all four motor plugs disconnected.
-21. Connect the SM2P mating pigtail to the inline fuse holder using a correctly sized step-down crimp.
-22. Put the fuse holder within 10cm of the battery connector.
-23. Leave the 7.5A fuse out.
-24. Connect the fuse-holder output to the master switch.
-25. Connect the switch output to the positive distribution block.
-26. Connect the SM2P negative wire to the ground distribution block.
-27. Connect positive distribution to CNC Shield motor `+` with 18AWG wire.
-28. Connect ground distribution to CNC Shield motor `−` with 18AWG wire.
-29. Connect positive distribution to buck `IN+`.
-30. Connect ground distribution to buck `IN−`.
-31. Connect the 470µF capacitor across the CNC motor terminal: capacitor `+` to motor `+`, striped `−` lead to motor `−`.
-32. Verify capacitor polarity twice; a reversed electrolytic can fail violently.
-33. Insert the 7.5A fuse and connect one battery.
-34. Turn the master switch on without the Pi, Uno USB or motors connected.
-35. Measure battery polarity at the CNC terminal; red probe on `+` must show positive voltage.
-36. Adjust the buck output to 5.1V with a multimeter.
-37. Turn the master switch off and remove the fuse.
-38. Connect buck output to the Pi USB-C power input using the buck's supported USB output cable.
-39. Connect Pi USB-A to Uno USB-C using the data-capable cable.
-40. Connect the UVC webcam to another Pi USB-A port.
-41. Mount the webcam rigidly at the front centre with the bin not blocking its view.
-42. Connect sensor 5V distribution to the shield 5V rail.
-43. Connect sensor ground distribution to shield GND.
-44. Mount US1 facing 0° straight forward.
-45. Wire US1: VCC→5V, GND→GND, TRIG→D9/X-limit signal, ECHO→D10/Y-limit signal.
-46. Mount US2 facing 75° left-front.
-47. Wire US2: VCC→5V, GND→GND, TRIG→D11/Z-limit signal, ECHO→A0/Abort.
-48. Mount US3 facing 145° left-rear.
-49. Wire US3: VCC→5V, GND→GND, TRIG→A1/Hold, ECHO→A2/Resume.
-50. Mount US4 facing 215° right-rear.
-51. Wire US4: VCC→5V, GND→GND, TRIG→A3/CoolEn, ECHO→D0/RX.
-52. Mount US5 facing 285° right-front.
-53. Wire US5: VCC→5V, GND→GND, TRIG→D1/TX, ECHO→A4/SDA.
-54. Leave A5 unconnected.
-55. Confirm end-stop headers supply signal and ground only; no sensor VCC may depend on an end-stop header.
-56. Use continuity mode with the motor disconnected to confirm black/green form one JK42HS40 coil and red/blue form the other.
-57. Connect black/green to one driver coil pair and red/blue to the other pair for each motor.
-58. Lift the chassis so all wheels are clear of the floor.
-59. Remove the four motor plugs again before setting Vref.
-60. Insert the 7.5A fuse, connect one battery and turn the switch on.
-61. Measure Vref between driver potentiometer wiper and GND.
-62. Set every R050 driver to 0.510V or every R100 driver to 1.020V.
-63. Turn power off and wait for LEDs to extinguish.
-64. Reconnect all motor plugs.
-65. Flash `firmware/fetch_drive/fetch_drive.ino` to the Uno R4.
-66. Boot the Pi and verify the Uno appears as `/dev/ttyACM0`.
-67. With wheels lifted, command one motor position at a time and verify X=front-left, Y=front-right, Z=rear-left, A=rear-right.
-68. Power off before reversing a motor connector or changing a coil connection.
-69. Verify a forward command propels all four wheels forward.
-70. Verify a rotation command drives left and right sides oppositely.
-71. Verify no A4988 enters thermal shutdown during a ten-minute lifted-wheel test.
-72. Test US1 against a flat board at 20cm, 60cm and 100cm.
-73. Confirm US1 stops positive forward commands below 60cm.
-74. Test US2, US3, US4 and US5 individually against a flat board.
-75. Confirm readings change for the correct physical sensor only.
-76. Verify the Pi webcam opens as camera 0.
-77. Print four checkpoint posters at 100% scale without trimming their white borders.
-78. Glue each poster to rigid matte backing.
-79. Place markers 0, 1, 2 and 3 approximately 3–5m apart in a simple corridor.
-80. Ensure each next AprilTag is visible from the preceding stopped position.
-81. Put each destination poster above a broad wall/backboard that US1 can detect.
-82. Scan every QR code with the iPhone app.
-83. Confirm every AprilTag decodes through the installed Pi webcam.
-84. Create the route: `python3 tools/make_topo_map.py --edges 0-1,1-2,2-3 --output topo_map.json`.
-85. Check it: `python3 pi/topo_nav.py --map topo_map.json --check`; require `CONNECTED`.
-86. Physically park FETCH at marker 0.
-87. Start: `python3 pi/topo_server.py --map topo_map.json --camera 0 --serial /dev/ttyACM0 --start-zone 0`.
-88. Set `PI_BASE` in `ios/FetchCheckpoint.swift` to the Pi's current IP.
-89. Put iPhone and Pi on the same Wi-Fi network.
-90. For the first floor test only, set `APPROACH_MMS = 100.0` in `pi/topo_nav.py`, restart the server, scan checkpoint 1 and call FETCH.
-91. Test every adjacent edge in both directions before attempting the whole route.
-92. Restore `APPROACH_MMS = 200.0`, restart the server and rerun `./verify_all.sh`.
-93. Test app cancellation while moving.
-94. Disconnect Wi-Fi while moving and require a stop within 500ms plus deceleration.
-95. Cover the camera and require route failure without uncontrolled continued travel.
-96. Place an obstacle 50cm in front and require forward motion to stop.
-97. Test obstacles near each corner sensor during rotation.
-98. Confirm the master switch immediately removes motor and compute power.
-99. Fully charge one pack with the supplied charger, attended and on a nonflammable surface.
-100. Run the exact demo route repeatedly for 20 minutes.
-101. Check battery, SM2P connector, fuse holder, buck and A4988 temperatures every five minutes.
-102. Stop immediately for swelling, smell, softening, unexpected heat, Pi undervoltage or driver shutdown.
-103. Repeat the 20-minute rehearsal using the second pack.
-104. Choose the better pack for the judge run and keep the other charged, disconnected and ready for a power-off swap.
-105. Run `./verify_all.sh` once more on the final software.
-106. Perform two complete successful summons immediately before the judge demo.
+16. Do not use the L293D shield: its approximately 0.6 A continuous channel rating and voltage loss are a poor match for four loaded TT motors.
+17. Do not use the old CNC Shield, A4988 drivers, or JK42HS40 NEMA motors with this wiring or firmware.
+18. Do not feed 11.1–12.6 V directly into any TT motor.
+19. Do not feed the motor battery directly into the Uno 5 V pin, Pi, camera, sonar, or L298 logic-5 V terminal.
+20. Do not parallel the two XL4015 outputs; each converter powers only its assigned L298N motor-supply input.
+21. Do not connect two battery packs together.
+22. Do not use a fixed 5 V automotive converter for the L298 motor rail; the L298 bridge voltage drop would leave the motors underpowered.
+23. Do not add a TF-Luna, camera-tilt servo, or battery monitor to this pin map.
 
-## Fixed operating values
+## Mechanical assembly
 
-| Value | Final setting |
-|---|---:|
-| Wheel diameter | 80mm |
-| Microstepping | 1/4 |
-| Firmware speed ceiling | 250mm/s |
-| Automatic approach | 200mm/s |
-| Slew | 500mm/s² |
-| US1 front polling | 50ms |
-| Corner polling | one every 80ms |
-| Front stop | 60cm |
-| Checkpoint arrival | 65cm |
-| Side/rear stop | 35cm |
-| Rotation stop | 20cm |
-| Command watchdog | 500ms |
-| Motor current target | 1.275A |
-| Fuse | 7.5A |
+24. Assemble the chassis and verify every mecanum roller turns freely.
+25. Orient all four wheels according to the chassis manufacturer's mecanum X-pattern; photograph the finished orientation.
+26. Label the motor locations `FL`, `FR`, `RL`, and `RR` before wiring.
+27. Mount the battery low and centered, isolated from sharp metal edges.
+28. Mount both L298N modules and both XL4015 modules where air can circulate and no conductive surface touches their undersides.
+29. Mount the physical switch where an operator can reach it immediately.
+30. Mount the fuse holder within 10 cm of the battery positive connector.
+31. Mount the Pi, Uno, and camera rigidly; aim the camera level and straight forward.
+32. Mount the front sonar facing forward.
+33. Mount left-front and left-rear sonar modules facing left, separated as far as the chassis permits.
+34. Mount right-front and right-rear sonar modules facing right, separated as far as the chassis permits.
+35. Keep sonar transducers clear of wheels, cables, soft fabric, and angled chassis plates.
 
-## Go/no-go
+## Power wiring — battery disconnected
 
-Run for judges only if all five sensors report correctly, all four motors pass direction tests, the camera sees every route edge, the graph is connected, no driver thermally shuts down, the Pi has no undervoltage warning, the selected battery completes 20 minutes and the operator can reach the switch immediately.
+36. Identify battery positive and negative with the multimeter; never trust wire color alone.
+37. Cut only a replaceable adapter lead if possible; do not cut the battery pack itself near its cells.
+38. Connect battery positive to the inline 3 A fuse holder.
+39. Connect the fuse-holder output to the master switch input.
+40. Split the switched positive into two independent branches: XL4015 #1 `IN+` and XL4015 #2 `IN+`.
+41. Split battery negative into XL4015 #1 `IN-`, XL4015 #2 `IN-`, L298N #1 GND, L298N #2 GND, and Uno GND.
+42. Ensure the negative split makes one common reference among the motor battery, both converters, both L298Ns, and Uno.
+43. Remove the `5V-EN` regulator jumper from both L298N modules.
+44. Remove `ENA` and `ENB` jumper caps from both L298N modules so D5/D6/D9/D10 can provide PWM.
+45. Leave both L298 motor-supply terminals disconnected while adjusting the converters.
+46. Insert the 3 A fuse, turn on briefly, and set XL4015 #1 to exactly 6.50 V using the multimeter.
+47. Set XL4015 #2 to exactly 6.50 V using the multimeter.
+48. Turn power off and wait for both converter outputs to fall below 0.5 V.
+49. Connect XL4015 #1 `OUT+`/`OUT-` only to L298N #1 motor `VS/+12V` and GND.
+50. Connect XL4015 #2 `OUT+`/`OUT-` only to L298N #2 motor `VS/+12V` and GND.
+51. Install one 470 µF capacitor directly across each L298 motor-supply input: capacitor `+` to 6.5 V and striped `-` to GND.
+52. Connect Uno `5V` to both L298N logic `5V` terminals; the removed `5V-EN` jumpers prevent regulator conflict.
+53. Power the Uno through its USB connection to the Pi; never power the Pi from the Uno.
+54. Power the Pi only from the separate 5.1 V / 3 A power bank.
+55. Confirm the Pi USB-to-Uno cable also provides the serial link and common logic ground.
+
+## Exact motor-driver signal wiring
+
+56. Connect L298N #1 channel A to motor `M1/FL`: `ENA=D5`, `IN1=D2`, `IN2=D4`.
+57. Connect L298N #1 channel B to motor `M2/FR`: `ENB=D6`, `IN3=D7`, `IN4=D8`.
+58. Connect L298N #2 channel A to motor `M3/RL`: `ENA=D9`, `IN1=D12`, `IN2=D13`.
+59. Connect L298N #2 channel B to motor `M4/RR`: `ENB=D10`, `IN3=A0`, `IN4=A1`.
+60. Connect each driver's two output terminals only to its assigned motor.
+61. Tug-test every screw-terminal conductor and verify no loose strands bridge adjacent terminals.
+
+| Motor | Position | PWM | Direction 1 | Direction 2 | Driver channel |
+|---|---|---:|---:|---:|---|
+| M1 | front-left | D5 | D2 | D4 | L298N #1 A |
+| M2 | front-right | D6 | D7 | D8 | L298N #1 B |
+| M3 | rear-left | D9 | D12 | D13 | L298N #2 A |
+| M4 | rear-right | D10 | A0 | A1 | L298N #2 B |
+
+## Exact ultrasonic wiring
+
+62. Connect all five HC-SR04 `VCC` pins to Uno 5 V.
+63. Connect all five HC-SR04 `GND` pins to the common Uno ground.
+64. Connect all five `TRIG` pins together and connect the shared trigger wire to D3.
+65. Connect front `ECHO` to D11.
+66. Connect left-front `ECHO` to A2.
+67. Connect right-front `ECHO` to A3.
+68. Connect left-rear `ECHO` to A4.
+69. Connect right-rear `ECHO` to A5.
+70. Keep D0 and D1 unused.
+
+All five modules transmit together because the direct L298 wiring consumes 12
+GPIO. Firmware captures all echo pulses concurrently and repeats every 65 ms.
+That meets the sensor's repeat-cycle guidance, but simultaneous modules can
+still hear one another. Physical cross-talk testing is a mandatory acceptance
+gate, not an optional improvement.
+
+## Electrical inspection before first power
+
+71. Remove the fuse and disconnect both the motor battery and Pi power bank.
+72. Measure resistance between battery positive and negative on the robot side; investigate a near-short before continuing.
+73. Verify continuity from every ground node to every other ground node.
+74. Verify there is no continuity from 6.5 V rails to 5 V logic rails.
+75. Verify converter outputs are not connected to one another.
+76. Verify both `5V-EN` jumpers and all four `ENA/ENB` jumpers are physically removed.
+77. Verify both capacitors have correct polarity.
+78. Reinsert the fuse, keep all motors lifted off the floor, and switch on.
+79. Measure both motor rails again: each must remain 6.3–6.7 V unloaded.
+80. Measure Uno/sensor/L298 logic: 4.8–5.2 V.
+81. Confirm the Pi shows no undervoltage warning on its separate supply.
+82. Switch off immediately for odor, smoke, hot wiring, converter squeal, or unstable voltage.
+
+## Load firmware and Pi software
+
+83. Install the Arduino CLI/core or Arduino IDE with the Uno R4 Minima board package.
+84. Flash `firmware/tt_fetch_drive/tt_fetch_drive.ino` to the Uno R4.
+85. Open serial at 115200 baud and confirm `FETCH_TT_READY V3` plus `S` telemetry packets containing five ranges and one stop flag.
+86. On the Pi run `sudo apt update`.
+87. Install dependencies with `sudo apt install -y python3-opencv python3-serial avahi-daemon`.
+88. Confirm `python3 -c "import cv2, serial; print(cv2.__version__, hasattr(cv2, 'aruco'))"` prints `True` for ArUco support.
+89. Copy the repository to the Pi and connect the UVC camera and Uno USB cable.
+90. Identify the Uno serial device with `ls -l /dev/serial/by-id/`; use that stable path instead of guessing `/dev/ttyACM0` when possible.
+91. Put the iPhone and Pi on the same private hotspot or travel router; do not rely on mall guest Wi-Fi because client isolation may block phone-to-Pi traffic.
+92. Park at a known checkpoint and start the server with `python3 pi/topo_server.py --serial /dev/serial/by-id/YOUR_UNO --map topo_map.json --start-zone 0 --host 0.0.0.0 --port 8080`, replacing `0` with the actual starting checkpoint.
+93. Verify `curl http://127.0.0.1:8080/status` on the Pi reports fresh camera and telemetry before enabling floor motion.
+
+After manual commissioning, install automatic startup from the Pi checkout:
+
+```bash
+bash pi/install_fetch_service.sh --dry-run \
+  --serial /dev/serial/by-id/YOUR_UNO --map /absolute/path/topo_map.json --start-zone 0
+sudo bash pi/install_fetch_service.sh \
+  --serial /dev/serial/by-id/YOUR_UNO --map /absolute/path/topo_map.json --start-zone 0
+```
+
+The real invocation installs required Pi packages, sets the hostname to `fetch`,
+enables Avahi and `fetch.service`, and prints the service status. The configured
+start zone is a physical promise: after every boot, park the robot at that exact
+checkpoint before allowing calls.
+
+## Build the iPhone app target
+
+94. Open the generated `ios/FetchCheckpoint.xcodeproj` in Xcode; regenerate it after editing `ios/project.yml` with `xcodegen generate --spec ios/project.yml`.
+95. Confirm the target's generated Info.plist contains `NSCameraUsageDescription` for checkpoint QR scanning.
+96. Confirm it contains `NSLocalNetworkUsageDescription` for nearby-robot control.
+97. Confirm App Transport Security permits local-network HTTP only; the generated project uses `NSAllowsLocalNetworking`, not a broad Internet exception.
+98. Select your development team, run on a physical iPhone, enter `http://fetch.local:8080`, and press **TEST CONNECTION**.
+99. Keep the app foregrounded and the phone awake throughout a call; its 500 ms status polling is the route heartbeat.
+
+## Print and map checkpoints
+
+100. Run `python3 markers/make_checkpoints.py` using Python with OpenCV ArUco, Pillow, qrcode, and NumPy installed.
+101. Print `markers/fetch_CHECKPOINTS_PRINT_ME.pdf` on A4 at **Actual Size / 100%** with no fit-to-page scaling.
+102. Measure the black AprilTag square; reject the print unless it is 180 mm ±1 mm.
+103. Start with checkpoints 2–3 m apart, approximately camera height, matte, flat, and well lit.
+104. Keep each tag's surrounding white quiet zone unobstructed.
+105. Use duplicate posters with the same checkpoint ID on angled/multi-face mounts if a checkpoint must be seen from different incoming directions.
+106. Treat an edge `A→B` as valid only when the robot stopped at A can acquire B and the straight physical segment A-to-B is cleared.
+107. If using `tools/make_topo_map.py --edges 0-1,1-2`, remember each hyphen creates both directions; physically test both `0→1` and `1→0`.
+108. Validate that the graph is strongly connected so every checkpoint can route to every other checkpoint.
+109. Do not place an edge around a blind corner, through a doorway that may close, or through normal pedestrian flow.
+
+## One-wheel and mecanum commissioning
+
+110. Keep the chassis lifted and send only stop commands at startup.
+111. Command each motor forward one at a time and record actual wheel-face direction from the outside of that wheel.
+112. Correct motor location only in firmware `CORNER`; correct direction only in firmware `POLARITY` or by swapping that motor's two output wires—not both.
+113. Repeat until a positive forward command makes all four wheel-ground contact patches propel the chassis forward.
+114. Test low-speed forward, backward, left strafe, right strafe, clockwise rotate, and counterclockwise rotate with the chassis still lifted.
+115. Put the robot on the floor at minimum practical speed and repeat each primitive for one second with an operator at the switch.
+116. Adjust only `TRIM` values in small increments if one motor is consistently stronger; do not conceal a mechanical bind with software.
+117. Run the small mecanum circle test and confirm the chassis orientation remains approximately fixed; if it spins, stop and repair wheel placement/corner/polarity mapping before navigation.
+
+## Mandatory sensor and navigation acceptance tests
+
+118. Test every sonar alone against a large flat target at 20, 60, and 100 cm; require ±3 cm or document a stricter observed envelope.
+119. Test all five operating together in their installed positions at the same distances and at angled walls; reject the shared-trigger layout if cross-talk produces unsafe false-clear readings.
+120. Place obstacles just inside each programmed threshold and command motion toward them; every applicable direction must stop.
+121. Cover the camera during a route; verify motor commands cease within one second.
+122. Disconnect Uno USB during a route; verify the 500 ms firmware command watchdog stops motion.
+123. Disable iPhone Wi-Fi or close the app during a route; verify the server stops motion approximately two seconds after heartbeat loss.
+124. Press **STOP FETCH** during forward, strafe, and rotation; verify each stops.
+125. Place an unrelated obstacle at 50 cm while the target tag is still small; verify the software reports blocked and never claims arrival.
+126. At each checkpoint, verify arrival requires the correct target tag centered, sufficiently large, and front sonar near 65 cm for the hold time.
+127. Traverse every directed edge twice in daylight-equivalent lighting and twice in the actual demo lighting without touching the robot.
+128. Summon from every checkpoint to every other checkpoint at least once; any failure means the graph/demo is not ready.
+
+## Power, heat, payload, and 20-minute acceptance
+
+129. Fully charge the pack only with its matching charger; after resting, verify approximately 12.6 V and no swelling, damage, odor, or heat.
+130. Measure battery-side current with wheels lifted, forward on the floor, strafe, rotate, blocked-start for less than one second, and with final payload.
+131. Require normal sustained battery current to stay at or below 3 A because the selected fuse and small SM-style connector are the present limit.
+132. If the 3 A fuse opens during normal motion, do not install a larger fuse until the exact battery BMS, connector, lead, switch, and motor-stall ratings are verified.
+133. Record motor-rail voltage under the worst normal floor maneuver; investigate a rail below 5.8 V or repeated Uno/Pi resets.
+134. Weigh the complete robot and keep it below the chassis maker's claimed 1500 g capacity with margin.
+135. Run the final route continuously for 20 minutes with the intended payload and network.
+136. At 5, 10, 15, and 20 minutes record battery, connector, XL4015, L298N, and motor temperatures.
+137. Stop for a battery above 45 °C, warm/darkened connector, motor odor, repeated thermal shutdown, or any wiring too hot to touch; use an infrared thermometer and keep L298N/XL4015 case surfaces below 70 °C as a conservative prototype gate.
+138. After the run, switch off and measure the rested battery; stop demo use and recharge at 10.5 V rather than relying on unknown pack protection.
+139. A simple 80%-usable capacity model predicts about 32 minutes at 3 A, 38 minutes at 2.5 A, and 48 minutes at 2 A; only the physical 20-minute payload test proves your pack/build.
+
+## Demo-day operating sequence
+
+140. Inspect tires, wheel screws, wires, fuse, switch, battery condition, camera aim, and all posters.
+141. Measure the resting motor battery and confirm both motor rails are 6.3–6.7 V.
+142. Power the Pi first, start the server, then power the motor system with wheels clear.
+143. Confirm `/status` shows fresh camera, fresh telemetry, no stop flag, and a valid map.
+144. Place the robot exactly at a commissioned checkpoint pose.
+145. Put one trained operator beside the robot's physical switch for every run.
+146. Have the user stand at a poster, scan its QR, verify the displayed checkpoint ID, and press **CALL FETCH**.
+147. Keep the app foregrounded while the robot follows the route; never enter its path to demonstrate avoidance.
+148. If behavior differs from commissioning, press app stop and then the physical switch—do not debug a moving robot.
+149. At arrival, retrieve/load the robot only after it is fully stopped.
+150. After the demo, switch motor power off, shut down the Pi normally, disconnect the battery, and charge/store it on a nonflammable surface under supervision.
+
+## Go/no-go record
+
+The build is **software-verified but not physically approved** until every blank
+below contains measured evidence from this exact assembled robot.
+
+Copy `commissioning/acceptance_template.json` to a new robot/date-specific JSON
+file, enter the measured results, then run
+`python3 tools/validate_commissioning.py commissioning/YOUR_RECORD.json`. The
+blank template must fail; do not replace missing measurements with estimates.
+
+| Gate | Pass evidence required | Result |
+|---|---|---|
+| Two XL4015 rails | 6.3–6.7 V idle and ≥5.8 V worst normal load | ___ |
+| Logic rail | 4.8–5.2 V, no resets | ___ |
+| Current/fuse | all sustained modes ≤3 A; 3 A fuse survives | ___ |
+| Five sonars | 20/60/100 cm and installed cross-talk test pass | ___ |
+| Motion primitives | F/B/L/R/CW/CCW correct, no unintended spin | ___ |
+| Directed graph | every physical edge passes twice in demo lighting | ___ |
+| Failure stops | camera, USB, phone, obstacle, cancel all pass | ___ |
+| Arrival integrity | obstacle never equals arrival; target gate passes | ___ |
+| Payload | total mass and floor traction pass | ___ |
+| Runtime/thermal | 20 min pass with recorded temperatures | ___ |
+| Network | private network covers entire route without isolation | ___ |
+| Full summons | every source-to-destination call passes | ___ |
+
+No source-code analysis or calculation can fill these physical results. Until
+all rows pass, describe FETCH as an in-progress supervised prototype—not as a
+validated mall robot.
