@@ -28,6 +28,12 @@ except ImportError:
     Robot = None
 
 try:
+    from autopilot import Autopilot, TiltSweep
+except Exception as _e:
+    Autopilot = TiltSweep = None
+    print(f"[gui] autopilot unavailable: {_e}")
+
+try:
     from fetch_auto import Vision
 except Exception as _e:            # camera libs missing etc - GUI still runs
     Vision = None
@@ -127,6 +133,19 @@ PAGE = r"""<!doctype html>
   <h1>FETCH <span>control</span></h1>
   <div id="link">connecting…</div>
 </header>
+
+<div class="card" id="autocard">
+  <h2>Go to art piece <span class="val" id="autostat">idle</span></h2>
+  <div id="tagrow" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+    <button class="tagbtn" data-t="0" style="height:52px;font-size:15px">0</button>
+    <button class="tagbtn" data-t="1" style="height:52px;font-size:15px">1</button>
+    <button class="tagbtn" data-t="2" style="height:52px;font-size:15px">2</button>
+    <button class="tagbtn" data-t="3" style="height:52px;font-size:15px">3</button>
+    <button class="tagbtn" data-t="4" style="height:52px;font-size:15px">4</button>
+  </div>
+  <div id="autodetail" style="font-size:11.5px;color:var(--dim);margin-top:8px;
+       min-height:15px">tap a tag number to drive there autonomously</div>
+</div>
 
 <div class="card" id="camcard" style="padding:10px">
   <h2>Camera <span class="val" id="camstat">…</span></h2>
@@ -301,14 +320,43 @@ $('#calsave').onclick = async ()=>{
                              '\nTell Claude — it will flash the fix.';
 };
 
+// --- autonomous: go to tag ---
+document.querySelectorAll('.tagbtn').forEach(b=>{
+  b.onclick = ()=>{
+    const already = b.classList.contains('on');
+    document.querySelectorAll('.tagbtn').forEach(x=>x.classList.remove('on'));
+    if(already){ post('/auto', {}); }            // tapping again cancels
+    else { b.classList.add('on'); post('/auto', {target:+b.dataset.t}); }
+  };
+});
+
 // --- camera feed ---
+// Polled stills rather than an MJPEG <img>: multipart/x-mixed-replace is
+// unreliable in several mobile browsers and fails silently, showing nothing.
+// Fetching a JPEG every 150 ms works everywhere. Decode into an off-screen
+// Image first and only swap once it has loaded, so the view never flickers.
 (function(){
   const img = $('#cam'), stat = $('#camstat');
-  fetch('/state').then(r=>r.json()).then(j=>{
-    if(j.cam){ img.src = '/camera.mjpg'; stat.textContent = 'live'; }
-    else { stat.textContent = 'not detected'; $('#camcard').style.opacity = .5; }
-  }).catch(()=>{ stat.textContent = 'offline'; });
-  img.onerror = ()=>{ stat.textContent = 'stream error'; };
+  let busy = false, fails = 0;
+
+  function tick(){
+    if(busy) return;
+    busy = true;
+    const probe = new Image();
+    probe.onload = ()=>{
+      img.src = probe.src;              // swap only after a full decode
+      busy = false; fails = 0;
+      $('#camcard').style.opacity = 1;
+    };
+    probe.onerror = ()=>{
+      busy = false;
+      if(++fails > 6){ stat.textContent = 'camera offline';
+                       $('#camcard').style.opacity = .5; }
+    };
+    probe.src = '/snapshot.jpg?t=' + Date.now();
+  }
+  setInterval(tick, 150);               // ~6-7 fps, plenty to drive by
+  tick();
 })();
 
 // --- obstacle-avoidance toggle ---
@@ -338,6 +386,14 @@ setInterval(async ()=>{
     $('#link').classList.remove('bad');
     const cs = $('#camstat');
     if(j.cam) cs.textContent = j.tag ? ('TAG ' + j.tag.id) : 'live · no tag';
+    if(j.auto){
+      $('#autostat').textContent = j.auto.state;
+      $('#autodetail').textContent = j.auto.detail || '';
+      const running = (j.auto.state==='searching'||j.auto.state==='approaching');
+      document.querySelectorAll('.tagbtn').forEach(b=>{
+        b.classList.toggle('on', running && +b.dataset.t === j.auto.target);
+      });
+    }
   }catch(e){ $('#link').textContent = 'link lost'; $('#link').classList.add('bad'); }
 }, 250);
 </script>
@@ -384,6 +440,7 @@ class Handler(BaseHTTPRequestHandler):
     robot = None
     deadman = None
     vision = None
+    auto = None
 
     def log_message(self, *a):
         pass                                   # keep the console clean
@@ -406,7 +463,23 @@ class Handler(BaseHTTPRequestHandler):
                 "cam": bool(v and v.ok),
                 "tag": tag,
                 "zones": (v.zones if (v and v.fresh) else None),
+                "auto": (self.auto.status() if self.auto else None),
             })
+
+        if self.path.startswith("/snapshot.jpg"):
+            jpg = self.vision.latest_jpeg() if (self.vision and self.vision.ok) else None
+            if not jpg:
+                self.send_response(503); self.end_headers(); return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(jpg)))
+            self.end_headers()
+            try:
+                self.wfile.write(jpg)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
 
         if self.path.startswith("/camera.mjpg"):
             if not (self.vision and self.vision.ok):
@@ -429,6 +502,11 @@ class Handler(BaseHTTPRequestHandler):
         body = PAGE.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        # The page changes every time the robot code is redeployed. Without
+        # this, phones happily serve a cached copy for hours and new panels
+        # (like the camera) simply never appear.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -441,10 +519,14 @@ class Handler(BaseHTTPRequestHandler):
             data = {}
         p = self.path
         if p.startswith("/drive"):
+            if self.auto and self.auto.busy:
+                self.auto.abort()      # a human taking the controls wins
             self.robot.drive(data.get("vx", 0), data.get("vy", 0), data.get("w", 0))
             self.deadman.touch()
         elif p.startswith("/stop"):
             self.deadman.clear()
+            if self.auto:
+                self.auto.abort()      # STOP outranks autonomy
             self.robot.stop()
             print("[stop] emergency stop")
         elif p.startswith("/tilt"):
@@ -458,6 +540,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.deadman.touch()
             else:
                 self.deadman.clear()
+        elif p.startswith("/auto"):
+            if self.auto:
+                tgt = data.get("target")
+                if tgt is None:
+                    self.auto.abort()
+                else:
+                    self.auto.go(int(tgt))
         elif p.startswith("/guard"):
             self.robot.guard(bool(data.get("on", True)))
         elif p.startswith("/cal"):
@@ -497,6 +586,10 @@ if __name__ == "__main__":
     if Vision is not None and not args.fake:
         Handler.vision = Vision()
         Handler.vision.start()
+
+    if Autopilot is not None:
+        Handler.auto = Autopilot(Handler.robot, Handler.vision,
+                                 TiltSweep(Handler.robot))
 
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"\n  open  http://{my_ip()}:{args.port}   (ctrl-C to quit)\n")
