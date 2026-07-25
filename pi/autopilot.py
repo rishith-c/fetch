@@ -108,18 +108,18 @@ class Autopilot:
         """
         route = self.paths.route(self.target) if self.paths else None
         if not route:
-            return True                      # nothing taught; go straight to vision
+            return True, False               # nothing taught; go straight to vision
         self.state = "replaying"
         total = sum(s[3] for s in route)
         done = 0.0
         for vx, vy, w, dt in route:
             if self._stop.is_set():
-                return False
+                return False, True
             self.detail = f"replaying route: {int(100 * done / total)}%"
             end = time.time() + dt
             while time.time() < end:
                 if self._stop.is_set():
-                    return False
+                    return False, True
                 f = self.robot.sensors.get("f", 0)
                 # 0 means no echo (or unplugged) - never treat that as an
                 # obstacle, or a dead sensor would freeze every replay.
@@ -133,13 +133,22 @@ class Autopilot:
                 time.sleep(0.05)
             done += dt
         self.robot.stop()
-        return True
+        return True, True
 
     def _run(self, timeout):
         t0 = time.time()
         last_seen = 0.0
         try:
-            if not self._replay():
+            completed, had_route = self._replay()
+            if not completed:
+                return
+            # A route with no calibrated tag IS the whole plan. Hunting for a
+            # tag that was never taught would drive the robot back off the
+            # spot the route just put it on, then fail at the timeout.
+            if had_route and not (self.tag_map and self.tag_map.target(self.target)):
+                self.robot.stop()
+                self.state = "arrived"
+                self.detail = f"route to {self.target} complete (no tag calibrated)"
                 return
             while not self._stop.is_set():
                 if time.time() - t0 > timeout:

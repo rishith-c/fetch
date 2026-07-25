@@ -46,7 +46,9 @@ class Robot:
         self.ser = serial.Serial(self.port, baud, timeout=0.1)
         time.sleep(2.0)                     # R4 resets when the port opens
         self.ser.reset_input_buffer()
-        self.sensors = {k: 0 for k in ("f", "lf", "rf", "lr", "rr")}
+        # Three FRONT sensors. The rear pair was removed from the robot;
+        # keeping dead keys here would show phantom 0s in the GUI.
+        self.sensors = {k: 0 for k in ("f", "lf", "rf")}
         self._vel = (0, 0, 0)
         self._stop = threading.Event()
         self._rx = threading.Thread(target=self._reader, daemon=True)
@@ -68,7 +70,14 @@ class Robot:
             try:
                 chunk = self.ser.read(256)          # whatever has arrived
             except Exception:
-                break
+                # The Uno vanished - almost always a reset that re-enumerated
+                # the port (it can come back as a DIFFERENT ttyACM number).
+                # Reopening beats dying: otherwise the GUI looks alive but
+                # every command silently goes nowhere until someone restarts it.
+                if not self._reopen():
+                    break
+                buf = b""
+                continue
             if not chunk:
                 continue
             buf += chunk
@@ -83,6 +92,30 @@ class Robot:
                                 self.sensors[k] = int(v)
             if len(buf) > 512:                     # never grow unbounded
                 buf = buf[-256:]
+
+    def _reopen(self):
+        """Try to find and reopen the Uno. True if we got it back."""
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+        for _ in range(10):                        # ~10 s of trying
+            if self._stop.is_set():
+                return False
+            time.sleep(1.0)
+            try:
+                port = find_port()
+                if not port:
+                    continue
+                self.ser = serial.Serial(port, BAUD, timeout=0.1)
+                time.sleep(2.0)                    # R4 resets on open
+                self.port = port
+                print(f"[drive] reconnected on {port}")
+                return True
+            except Exception:
+                continue
+        print("[drive] could not reconnect")
+        return False
 
     def _keepalive(self):
         """Uno kills the motors if v goes quiet 500 ms — refresh at 10 Hz."""
