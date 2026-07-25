@@ -19,7 +19,10 @@ DPI = 300
 TAG_MM = 140                 # printed black-square size; big = seen from far
 PAGE_W_MM, PAGE_H_MM = 216, 279          # US Letter
 IDS = [0, 1, 2, 3, 4]
-OUT = "/Users/rishith/Desktop/FETCH_apriltags"
+import os
+# Desktop needs macOS permission this process may not have; keep the
+# printable output in the repo where it is versioned and always writable.
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apriltags")
 
 mm = lambda v: int(round(v / 25.4 * DPI))
 
