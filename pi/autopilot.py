@@ -45,10 +45,15 @@ DEFAULT_TIMEOUT = 90.0
 
 
 class Autopilot:
-    def __init__(self, robot, vision, tilt_sweep=None):
+    def __init__(self, robot, vision, tilt_sweep=None, tag_map=None):
         self.robot = robot
         self.vision = vision
         self.tilt = tilt_sweep
+        # Calibrated arrival signatures. Without one we fall back to
+        # AREA_ARRIVED, which is a guess at "about 0.6 m from a 140 mm tag";
+        # with one the robot stops exactly where you parked it during
+        # calibration, which is the whole point of the feature.
+        self.tag_map = tag_map
         self.state = "idle"
         self.target = None
         self.detail = ""
@@ -119,13 +124,27 @@ class Autopilot:
             if self.state in ("searching", "approaching"):
                 self.state = "aborted"
 
+    def _goal(self):
+        """Arrival signature for the current target: the calibrated view if
+        there is one, otherwise the hardcoded fallback."""
+        saved = self.tag_map.target(self.target) if self.tag_map else None
+        if saved:
+            return float(saved["area"]), float(saved.get("cx", 0.0)), True
+        return float(AREA_ARRIVED), 0.0, False
+
     def _approach(self, tag, sonar):
         """Centre with a STRAFE, close with a creep. Returns True on arrival."""
         self.state = "approaching"
-        x = tag["cx_norm"]
+        goal_area, goal_cx, calibrated = self._goal()
+        # Aim the tag at the offset it had during calibration, not at dead
+        # centre - if you parked slightly to one side of the piece, that
+        # offset IS part of the location you saved.
+        x = tag["cx_norm"] - goal_cx
         area = tag["area"]
-        close = area >= AREA_ARRIVED
+        close = area >= goal_area
         centred = abs(x) < CENTRE_DEADBAND
+        self.detail = (f"tag {self.target}: {int(area)}/{int(goal_area)} px"
+                       + ("" if calibrated else "  (uncalibrated)"))
 
         if close and centred:
             self.robot.stop()
@@ -142,7 +161,9 @@ class Autopilot:
             vx = 0
             self.detail = f"blocked at {f} cm, sidestepping"
         else:
-            self.detail = f"tag {self.target}: x={x:+.2f} area={int(area)}"
+            pct = min(100, int(100 * area / goal_area)) if goal_area else 0
+        self.detail = (f"tag {self.target}: {pct}% there"
+                       + ("" if calibrated else "  (uncalibrated)"))
 
         self.robot.drive(vx, vy, 0)
         return False

@@ -16,10 +16,10 @@ The refinement that makes it easy:
 
 So each poster carries TWO codes, for two different readers:
 
-    APRILTAG (big, top)   -> the ROBOT reads it.
-                             Gives full 6DOF pose. Robot learns where IT is,
-                             to ~3.7cm when 5+ are visible. This is what
-                             replaces SLAM/odometry/TF/Nav2.
+    APRILTAG (big, top)   -> the ROBOT reads its ID, image centre, and size.
+                             Those measurements let it select the next graph
+                             node and visually steer to the poster. No metric
+                             pose or centimetre-accuracy claim is made.
 
     QR CODE  (small, bottom) -> the PHONE reads it.
                              Just the zone id. iOS VNDetectBarcodesRequest,
@@ -32,7 +32,10 @@ import cv2, numpy as np, os, qrcode
 
 OUT = os.path.dirname(os.path.abspath(__file__))
 N = 12
-TAG_MM, QR_MM, QUIET_MM = 100, 45, 12
+# 180 mm is the black AprilTag width. At 1280 px / 70 degree horizontal FOV
+# it is about 55 px wide at 3 m. Commission each real camera/route; 5 m is not
+# the default spacing. The A4 design leaves 15 mm of white quiet zone.
+TAG_MM, QR_MM, QUIET_MM = 180, 45, 12
 DPI = 300
 MM = 25.4
 def mm2px(v): return int(round(v / MM * DPI))
@@ -61,30 +64,32 @@ def poster(zid):
     # --- AprilTag: for the ROBOT ---
     t = mm2px(TAG_MM)
     tag = cv2.aruco.generateImageMarker(adict, zid, t)
-    ty = mm2px(38)
+    ty = mm2px(15)
     tx = cx - t//2
     page[ty:ty+t, tx:tx+t] = tag
-    cv2.putText(page, "ROBOT READS THIS", (tx, ty-mm2px(6)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.62, 120, 2, cv2.LINE_AA)
+    cv2.putText(page, "ROBOT APRILTAG", (tx, mm2px(9)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.52, 120, 2, cv2.LINE_AA)
 
     # --- zone name: for the HUMAN ---
     name = ZONES.get(zid, f"ZONE {zid}")
-    ny = ty + t + mm2px(22)
-    (tw, _), _ = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, 2.3, 6)
-    cv2.putText(page, name, (cx - tw//2, ny), cv2.FONT_HERSHEY_SIMPLEX, 2.3, 0, 6, cv2.LINE_AA)
-    cv2.putText(page, f"FETCH  ZONE {zid}", (cx - tw//2, ny + mm2px(9)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.72, 110, 2, cv2.LINE_AA)
+    ny = ty + t + mm2px(9)
+    font_scale = 1.15 if len(name) <= 14 else 0.85
+    thickness = 3
+    (tw, _), _ = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX,
+                                 font_scale, thickness)
+    cv2.putText(page, name, (cx - tw//2, ny), cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale, 0, thickness, cv2.LINE_AA)
 
     # --- QR: for the PHONE ---
     q = mm2px(QR_MM)
     qi = qr_img(f"FETCH:{zid}", q)
-    qy = ny + mm2px(20)
+    qy = ny + mm2px(5)
     qx = cx - q//2
     page[qy:qy+q, qx:qx+q] = qi
-    cv2.putText(page, "POINT YOUR PHONE HERE", (qx-mm2px(14), qy+q+mm2px(9)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.72, 0, 2, cv2.LINE_AA)
-    cv2.putText(page, "then press COME TO ME", (qx-mm2px(11), qy+q+mm2px(17)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, 120, 1, cv2.LINE_AA)
+    cv2.putText(page, f"SCAN QR - FETCH:{zid}", (qx-mm2px(18), qy+q+mm2px(7)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.54, 0, 2, cv2.LINE_AA)
+    cv2.putText(page, "THEN PRESS CALL FETCH", (qx-mm2px(20), qy+q+mm2px(14)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, 120, 1, cv2.LINE_AA)
     return page
 
 pages = [poster(i) for i in range(N)]
@@ -123,7 +128,7 @@ print(f"""
 === HOW THE PIECES FIT ===
    PHONE  reads QR  -> "FETCH:7"       -> POST /come {{"zone": 7}}
    PI     routes through the checkpoint adjacency graph
-   ROBOT  reads the next AprilTag and visually steers toward it
+   ROBOT  reads the next AprilTag ID and visually steers toward it
    UNO    five ultrasonic sensors veto unsafe motion in hard real-time
 
    The phone NEVER computes its position. It reads a number off a wall.
@@ -133,6 +138,7 @@ print(f"""
    Create the graph with tools/make_topo_map.py. No coordinates or survey.
 
 === PRINTING ===
-   100% / Actual Size. Then RULER the AprilTag: must be exactly {TAG_MM}mm.
-   Matte, glued to card. Each next checkpoint must be visible from the prior one.
+   A4, 100% / Actual Size. RULER the black AprilTag: exactly {TAG_MM}mm.
+   Matte and rigid. Start at 2-3 m checkpoint spacing. Each directed route
+   edge must be camera-tested in the exact physical direction it will be used.
 """)

@@ -29,6 +29,7 @@ except ImportError:
 
 try:
     from autopilot import Autopilot, TiltSweep
+    from tag_map import TagMap
 except Exception as _e:
     Autopilot = TiltSweep = None
     print(f"[gui] autopilot unavailable: {_e}")
@@ -58,6 +59,9 @@ class FakeRobot:
 
     def motor(self, i, spd):
         print(f"[fake] motor {i} spd={spd}")
+
+    def max_rate(self, sps):
+        print(f"[fake] max_rate {sps}")
 
     def guard(self, on):
         print(f"[fake] guard {on}")
@@ -180,6 +184,32 @@ PAGE = r"""<!doctype html>
 </div>
 
 <div class="card">
+  <h2>Calibrate art piece locations</h2>
+  <img id="cal" src="/camera.mjpg" style="width:100%;border-radius:10px;
+       background:#000;aspect-ratio:4/3;object-fit:cover">
+  <div id="callive" style="text-align:center;font-size:13px;margin:8px 0;
+       color:var(--dim)">looking for a tag...</div>
+  <button id="calbtn" style="width:100%;height:52px;font-size:16px"
+          disabled>hold up a tag</button>
+  <div id="calmsg" style="text-align:center;font-size:12px;min-height:16px;
+       margin-top:6px;color:var(--dim)"></div>
+  <div id="callist" style="font-size:12px;margin-top:10px"></div>
+  <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.5">
+    Park the robot exactly where it should end up, point it at the art
+    piece's tag, then press Calibrate. It saves how the tag LOOKS from
+    that spot - which is what "go to N" then drives back to.
+    Press again any time to recalibrate.</div>
+</div>
+
+<div class="card">
+  <h2>Motor rate <span class="val" id="ratev">520 steps/s</span></h2>
+  <input type="range" id="rate" min="120" max="1200" step="20" value="520">
+  <div style="font-size:11px;color:var(--dim);margin-top:6px">
+    Steppers are loud at some rates and quiet at others (resonance).
+    Sweep this while driving and stop where it sounds smoothest.</div>
+</div>
+
+<div class="card">
   <h2>Camera tilt <span class="val" id="tiltv">90°</span></h2>
   <input type="range" id="tilt" min="0" max="180" step="5" value="90">
 </div>
@@ -266,6 +296,39 @@ $('#crab').onclick = () => post('/crab');
 
 // --- sliders ---
 $('#spd').oninput = e => { speed = +e.target.value; $('#spdv').textContent = speed + '%'; };
+// --- calibration ---
+let liveTag = null;
+$('#calbtn').onclick = async () => {
+  const r = await (await fetch('/calibrate', {method:'POST',
+                    body:JSON.stringify({})})).json();
+  $('#calmsg').textContent = r.msg || '';
+  $('#calmsg').style.color = r.ok ? 'var(--ok)' : 'var(--warn)';
+  if (r.calib) renderCalib(r.calib);
+};
+function renderCalib(c){
+  const ids = Object.keys(c).sort();
+  $('#callist').innerHTML = ids.length
+    ? ids.map(i=>`<div style="display:flex;justify-content:space-between;
+        padding:4px 0;border-top:1px solid var(--line)">
+        <span>tag ${i} <span style="color:var(--dim)">${c[i].label||''}</span></span>
+        <span style="color:var(--dim)">${Math.round(c[i].area)} px
+        <a href="#" data-f="${i}" style="color:var(--warn);margin-left:8px">clear</a></span>
+      </div>`).join('')
+    : '<div style="color:var(--dim);text-align:center">nothing calibrated yet</div>';
+  $('#callist').querySelectorAll('a[data-f]').forEach(a=>{
+    a.onclick = async e => { e.preventDefault();
+      const r = await (await fetch('/forget',{method:'POST',
+        body:JSON.stringify({id:+a.dataset.f})})).json();
+      renderCalib(r.calib); };
+  });
+}
+
+let rateT = null;
+$('#rate').oninput = e => {
+  $('#ratev').textContent = e.target.value + ' steps/s';
+  clearTimeout(rateT);                       // don't spam the serial link
+  rateT = setTimeout(()=> post('/rate', {sps:+e.target.value}), 120);
+};
 $('#tilt').oninput = e => { $('#tiltv').textContent = e.target.value + '°';
                             post('/tilt', {deg:+e.target.value}); };
 
@@ -386,6 +449,21 @@ setInterval(async ()=>{
     $('#link').classList.remove('bad');
     const cs = $('#camstat');
     if(j.cam) cs.textContent = j.tag ? ('TAG ' + j.tag.id) : 'live · no tag';
+    liveTag = j.tag;
+    const cb = $('#calbtn'), cl = $('#callive');
+    if (cb) {
+      if (j.tag) {
+        cb.disabled = false;
+        cb.textContent = 'Calibrate location for tag ' + j.tag.id;
+        cl.textContent = `tag ${j.tag.id} · ${Math.round(j.tag.area)} px · `
+                       + `offset ${j.tag.cx_norm.toFixed(2)}`;
+      } else {
+        cb.disabled = true;
+        cb.textContent = 'hold up a tag';
+        cl.textContent = j.cam ? 'no tag in view' : 'camera not detected';
+      }
+    }
+    if (j.calib) renderCalib(j.calib);
     if(j.auto){
       $('#autostat').textContent = j.auto.state;
       $('#autodetail').textContent = j.auto.detail || '';
@@ -440,6 +518,7 @@ class Handler(BaseHTTPRequestHandler):
     robot = None
     deadman = None
     vision = None
+    tag_map = None
     auto = None
 
     def log_message(self, *a):
@@ -464,6 +543,7 @@ class Handler(BaseHTTPRequestHandler):
                 "tag": tag,
                 "zones": (v.zones if (v and v.fresh) else None),
                 "auto": (self.auto.status() if self.auto else None),
+                "calib": (self.tag_map.as_dict() if self.tag_map else {}),
             })
 
         if self.path.startswith("/snapshot.jpg"):
@@ -547,6 +627,22 @@ class Handler(BaseHTTPRequestHandler):
                     self.auto.abort()
                 else:
                     self.auto.go(int(tgt))
+        elif p.startswith("/calibrate"):
+            # Snapshot the CURRENT view of whatever tag is visible. The tilt
+            # goes in too, so a tag mounted high is re-found at the same angle.
+            tag = self.vision.tag if self.vision else None
+            tilt = getattr(self.auto.tilt, "angle", None) if self.auto else None
+            ok, msg = (self.tag_map.calibrate(tag, tilt=tilt)
+                       if self.tag_map else (False, "no tag map"))
+            return self._json({"ok": ok, "msg": msg,
+                               "calib": self.tag_map.as_dict() if self.tag_map else {}})
+        elif p.startswith("/forget"):
+            if self.tag_map:
+                self.tag_map.forget(int(data.get("id", -1)))
+            return self._json({"ok": True,
+                               "calib": self.tag_map.as_dict() if self.tag_map else {}})
+        elif p.startswith("/rate"):
+            self.robot.max_rate(int(data.get("sps", 520)))
         elif p.startswith("/guard"):
             self.robot.guard(bool(data.get("on", True)))
         elif p.startswith("/cal"):
@@ -587,9 +683,12 @@ if __name__ == "__main__":
         Handler.vision = Vision()
         Handler.vision.start()
 
+    Handler.tag_map = TagMap() if TagMap is not None else None
+
     if Autopilot is not None:
         Handler.auto = Autopilot(Handler.robot, Handler.vision,
-                                 TiltSweep(Handler.robot))
+                                 TiltSweep(Handler.robot),
+                                 tag_map=Handler.tag_map)
 
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"\n  open  http://{my_ip()}:{args.port}   (ctrl-C to quit)\n")

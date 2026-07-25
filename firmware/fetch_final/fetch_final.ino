@@ -8,12 +8,12 @@
  *
  * SENSORS: A0 is RR's direction pin, so the echoes route around it and use
  *   A2 (Resume) instead — A2 is free now that Y-DIR lives on D6.
- *     TRIG (all five, one shared wire) -> D9   (X+ endstop)
+ *     TRIG (all three, one shared wire) -> D9   (X+ endstop)
  *     ECHO front       D10 (Y+ endstop)   ECHO left-front  A1 (Hold)
- *     ECHO right-front A2  (Resume)       ECHO left-rear   A3 (CoolEn)
- *     ECHO right-rear  A4  (SDA)
+ *     ECHO right-front A2  (Resume)
+ *     (rear pair removed - A3/A4 are free again)
  * SERVO: signal D11 (Z+ endstop). Power from the BUCK at 5 V, never the Uno.
- * SPARE: D13, A5, D0, D1
+ * SPARE: D13, A3, A4, A5, D0, D1
  *
  * SERIAL 115200
  *   v <vx> <vy> <w>   -100..100 each   vx fwd, vy right, w clockwise
@@ -21,7 +21,7 @@
  *   m <corner> <spd>  one motor: 0=FL 1=FR 2=RL 3=RR
  *   t <0-180>         camera tilt
  *   c                 crab circle (~30 cm)      ?  report state
- *   OUT: "us f=52 lf=110 rf=0 lr=88 rr=200"  cm, 0 = no echo, ~7 Hz
+ *   OUT: "us f=52 lf=110 rf=0"  cm, 0 = no echo, ~11 Hz with 3 sensors
  *
  * SAFETY, both on the Uno so neither depends on WiFi:
  *   - v-mode stops if the Pi goes quiet 500 ms
@@ -39,10 +39,19 @@ AccelStepper* M[4] = { &FL, &FR, &RL, &RR };
 const float POL[4] = { +1, +1, -1, +1 };        // RL inverted in hardware
 
 const int ENABLE_PIN = 8;
+// Steps per rev depends on the MS1/MS2/MS3 jumpers under each A4988:
+//   no jumpers = 200 (full step, loudest)   1/2 = 400   1/4 = 800
+//   1/8 = 1600   1/16 = 3200 (quietest, but needs a high pulse rate)
+// Microstepping is the real cure for stepper noise. Change this to match
+// the jumpers you fit, or the speed scale will be wrong by that factor.
 const float STEPS_PER_REV = 200.0;
 const float WHEEL_CIRC_M  = 0.0600 * M_PI;      // 60 mm wheels
-const float MAX_MS        = 0.30;
-const float MAX_SPS       = MAX_MS * (STEPS_PER_REV / WHEEL_CIRC_M);
+
+// Steppers have loud and quiet speed bands (mechanical resonance), so the
+// top rate is tunable at runtime with 'k <steps/s>' - no reflash needed to
+// hunt for the quiet spot. Raised from 318 to give real headroom.
+float MAX_SPS = 520.0;
+const float MAX_SPS_CEILING = 1400.0;           // beyond this it just stalls
 
 // Crab circle, 2 ft radius.
 //   Peak wheel rate = amp*sqrt(2)*MAX_SPS and steppers STALL if commanded
@@ -56,8 +65,13 @@ const float CRAB_RAMP_S     = 0.8;              // ease in/out, no stall on star
 const int   CRAB_SLICE_MS   = 5;                // 4400 vector updates per lap
 
 const int TRIG = 9;
-const int ECHO[5] = { 10, A1, A2, A3, A4 };     // f, lf, rf, lr, rr
-const char* USNAME[5] = { "f", "lf", "rf", "lr", "rr" };
+// Three FRONT sensors only. The two rear ones were dropped: the robot never
+// reverses autonomously, so rear echoes cost scan time (each ping blocks up
+// to the echo timeout) and bought nothing. Fewer sensors = faster loop = the
+// front reading, which is the one the veto depends on, refreshes sooner.
+const int NUS = 3;
+const int ECHO[NUS] = { 10, A1, A2 };           // f, lf, rf
+const char* USNAME[NUS] = { "f", "lf", "rf" };
 const int FRONT = 0, VETO_CM = 25;
 // The front-obstacle veto is OFF until the sensors are proven. An interlock
 // fed by garbage data just blocks legitimate driving: a rail glitch pinned
@@ -68,14 +82,14 @@ const int FRONT = 0, VETO_CM = 25;
 bool guardOn = true;    // obstacle avoidance armed at boot
 int  frontHits = 0;
 const int VETO_MIN_CM = 3, VETO_CONFIRM = 2;
-int usCM[5] = { 0, 0, 0, 0, 0 };
+int usCM[NUS] = { 0, 0, 0 };
 int usIdx = 0;
 // Median-of-3 per sensor. A shared TRIG means all five ping at once, so a
 // sensor occasionally hears a neighbour's burst before its own return and
 // reports a wild short value. A median rejects that single outlier while
 // still tracking real movement.
-int usHist[5][3] = {{0}};
-byte usSlot[5] = { 0, 0, 0, 0, 0 };
+int usHist[NUS][3] = {{0}};
+byte usSlot[NUS] = { 0, 0, 0 };
 
 int median3(int a, int b, int c) {
   if (a > b) { int t = a; a = b; b = t; }
@@ -142,8 +156,9 @@ void crabCircle() {
   delay(5);
   while (Serial.available()) Serial.read();
   Serial.println("crab start");
-  float V   = (2.0 * M_PI * CIRCLE_RADIUS_M) / SECONDS_PER_LAP;   // m/s
-  float amp = min(V / MAX_MS, 0.7071f);          // cap: keep peak <= 1.0
+  float V      = (2.0 * M_PI * CIRCLE_RADIUS_M) / SECONDS_PER_LAP;   // m/s
+  float topMs  = MAX_SPS * WHEEL_CIRC_M / STEPS_PER_REV;   // current full-scale
+  float amp    = min(V / topMs, 0.7071f);        // cap: keep peak <= 1.0
   unsigned long t0 = micros();
   float lapUs = SECONDS_PER_LAP * 1e6;
   while ((float)(micros() - t0) < lapUs) {
@@ -174,6 +189,15 @@ void handleLine() {
     vMode = true; lastV = millis();
   } else if (c == 't') {
     tilt.write(constrain((int)strtol(line + 1, NULL, 10), 0, 180));
+  } else if (c == 'k') {
+    // k <steps/s> : set the full-scale wheel rate. Higher = faster, and the
+    // noise changes sharply with it - sweep to find the quiet band.
+    long v = strtol(line + 1, NULL, 10);
+    if (v >= 60 && v <= (long)MAX_SPS_CEILING) {
+      MAX_SPS = (float)v;
+      setVel(curVX, curVY, curW);        // re-apply at the new scale
+    }
+    Serial.print("maxsps="); Serial.println(MAX_SPS);
   } else if (c == 'g') {
     guardOn = (strtol(line + 1, NULL, 10) != 0);
     Serial.print("guard="); Serial.println(guardOn ? "ON" : "OFF");
@@ -200,7 +224,9 @@ void handleLine() {
       Serial.print(" vy="); Serial.print(curVY);
       Serial.print(" w=");  Serial.print(curW);
       Serial.print(" spd="); Serial.print(speedPct);
-      Serial.print(" guard="); Serial.println(guardOn ? "ON" : "OFF");
+      Serial.print(" guard="); Serial.print(guardOn ? "ON" : "OFF");
+      Serial.print(" maxsps="); Serial.print(MAX_SPS);
+      Serial.print(" m/s="); Serial.println(MAX_SPS * WHEEL_CIRC_M / STEPS_PER_REV);
     }
     else if (c == '+' || c == '-')
       speedPct = constrain(speedPct + (c == '+' ? 10 : -10), 20, 100);
@@ -211,10 +237,14 @@ void handleLine() {
 void setup() {
   Serial.begin(115200);
   pinMode(ENABLE_PIN, OUTPUT); digitalWrite(ENABLE_PIN, LOW);
-  float top = MAX_SPS * 1.6;
-  for (int i = 0; i < 4; i++) { M[i]->setMaxSpeed(top); M[i]->setSpeed(0); }
+  // setMaxSpeed must cover the ceiling, not today's MAX_SPS, or a later
+  // 'k' command would be silently clamped to the old limit.
+  for (int i = 0; i < 4; i++) {
+    M[i]->setMaxSpeed(MAX_SPS_CEILING * 1.6);
+    M[i]->setSpeed(0);
+  }
   pinMode(TRIG, OUTPUT); digitalWrite(TRIG, LOW);
-  for (int i = 0; i < 5; i++) pinMode(ECHO[i], INPUT_PULLDOWN);  // unwired = 0, not noise
+  for (int i = 0; i < NUS; i++) pinMode(ECHO[i], INPUT_PULLDOWN);  // unwired = 0, not noise
   tilt.attach(SERVO_PIN); tilt.write(90);
   Serial.println("FETCH FINAL READY");
 }
@@ -241,7 +271,7 @@ void loop() {
   if (millis() - lastReport >= 140) {
     lastReport = millis();
     Serial.print("us");
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < NUS; i++) {
       Serial.print(' '); Serial.print(USNAME[i]);
       Serial.print('='); Serial.print(usCM[i]);
     }

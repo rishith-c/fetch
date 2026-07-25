@@ -121,6 +121,11 @@ class Robot:
         self._vel = (0, 0, 0)
         self._send(f"m {int(i)} {int(spd)}")
 
+    def max_rate(self, sps):
+        """Full-scale wheel rate in steps/s. Steppers have loud and quiet
+        resonance bands, so this is the knob for hunting the quiet one."""
+        self._send(f"k {int(sps)}")
+
     def guard(self, on):
         """Arm/disarm the Uno's front-obstacle veto."""
         self._send(f"g {1 if on else 0}")
