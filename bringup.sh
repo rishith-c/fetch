@@ -68,8 +68,12 @@ ssh -o BatchMode=yes -o ConnectTimeout=20 pi '
 # starts, so an immediate read comes back empty on a cold boot.
 URL=""
 for i in $(seq 1 10); do
+  # -a because cloudflared's log contains bytes grep calls binary, which
+  # silently suppresses matches. And only trust a URL once the connection is
+  # REGISTERED: cloudflared prints the address several seconds before it works.
   URL=$(ssh -o BatchMode=yes -o ConnectTimeout=15 pi \
-        "grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' ~/cf.log 2>/dev/null | tail -1" 2>/dev/null)
+        "grep -aq 'Registered tunnel connection' ~/cf.log 2>/dev/null && \
+         grep -aoE 'https://[a-z0-9-]+\.trycloudflare\.com' ~/cf.log | tail -1" 2>/dev/null)
   [ -n "$URL" ] && break
   sleep 4
 done

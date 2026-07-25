@@ -1,0 +1,6 @@
+[Unit]
+Description=FETCH health watchdog (network, GUI, tunnel)
+
+[Service]
+Type=oneshot
+ExecStart=/home/varun/fetch-watchdog.sh
