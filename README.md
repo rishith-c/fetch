@@ -100,23 +100,25 @@ commit to a schedule.
 
 ## How much of this was fixed with a knife
 
-Every part was printed during the hackathon. Nothing came off a plate before
-the clock started, which meant the CAD had to be finished in the same hours as
-the firmware, and it shows.
-
-Roughly 80 percent of the parts needed cutting or modifying by hand before
-they would fit. Holes drilled out, walls trimmed, mounting faces filed back.
-Print quality was poor at the speed we ran, so tolerances that would have been
-fine on a careful print were not close enough to assemble.
+We modeled these in a hurry and it shows. Roughly 80 percent of the parts
+needed cutting or modifying by hand before they would fit. Holes drilled out,
+walls trimmed, mounting faces filed back. Print quality was poor at the speed
+we ran, so tolerances that would have been fine on a careful print were not
+close enough to assemble.
 
 Three of the four chassis joints needed super glue and repair work to hold.
 The robot that won is held together partly with adhesive and partly with
 patience.
 
-If you are rebuilding this, print the chassis first and dry fit it before
-committing to the rest. Most of what we cut by hand was avoidable with one
-test print and an hour of tolerance work, which is exactly the hour we did not
-have.
+Some features did not survive at all. The camera was supposed to sit on a tilt
+servo so it could sweep to find a tag and then hold it centred. The mount
+never fit properly, the servo never moved reliably, and we cut the whole
+feature and bolted the camera down at a fixed angle. That turned out fine, and
+arguably better, since a fixed camera is one less thing to fail mid demo.
+
+If you are rebuilding this, dry fit the chassis before committing to the rest.
+Most of what we cut by hand was avoidable with one test print and an hour of
+tolerance work.
 
 ## Software
 
