@@ -113,9 +113,10 @@ byte lineLen = 0;
 float wheelTgt[4] = {0, 0, 0, 0};    // what the mix asked for, sps
 float wheelCur[4] = {0, 0, 0, 0};    // what the motors are actually running
 unsigned long lastSlewUs = 0;
-// Full scale in ~0.2 s. Slower is safer against stalls but feels sluggish;
-// this puts the first 20 ms tick around 50 sps, well inside pull-in.
-float SLEW_SPS_PER_S = 2600.0;
+// Full scale in ~0.13 s. The first 20 ms tick asks for about 80 sps, still
+// far inside pull-in, but the robot answers the button quickly enough that it
+// does not feel laggy. 'a' lowers it if a wheel ever slips again.
+float SLEW_SPS_PER_S = 4000.0;
 
 void setVel(float vx, float vy, float w) {
   if (guardOn && vx > 0 && frontHits >= VETO_CONFIRM) vx = 0;   // veto

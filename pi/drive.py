@@ -50,6 +50,7 @@ class Robot:
         # keeping dead keys here would show phantom 0s in the GUI.
         self.sensors = {k: 0 for k in ("f", "lf", "rf")}
         self._vel = (0, 0, 0)
+        self._io = threading.Lock()         # one writer at a time on the port
         self._stop = threading.Event()
         self._rx = threading.Thread(target=self._reader, daemon=True)
         self._tx = threading.Thread(target=self._keepalive, daemon=True)
@@ -96,7 +97,8 @@ class Robot:
     def _reopen(self):
         """Try to find and reopen the Uno. True if we got it back."""
         try:
-            self.ser.close()
+            with self._io:
+                self.ser.close()
         except Exception:
             pass
         for _ in range(10):                        # ~10 s of trying
@@ -126,18 +128,30 @@ class Robot:
             time.sleep(0.1)
 
     def _send(self, msg):
-        self.ser.write((msg + "\n").encode())
+        # The keepalive thread and every HTTP handler thread write to this
+        # port. pyserial's write is not atomic, so without this lock two
+        # commands interleave mid-line and the Uno parses the wreckage as a
+        # different move. That looked like the robot doing something random
+        # and then correcting itself when the next clean keepalive landed.
+        with self._io:
+            self.ser.write((msg + "\n").encode())
 
     # ---------- commands ----------
     def drive(self, vx, vy=0, w=0):
         # Teaching taps here, not _send: _send also carries the 100 ms
         # keepalive repeats, and recording those would bloat the route with
         # hundreds of identical segments.
+        """vx forward, vy right, w clockwise. Each -100..100."""
         if self.recorder is not None:
             self.recorder.note(vx, vy, w)
-        """vx forward, vy right, w clockwise. Each -100..100."""
+        # The held button re-posts the SAME velocity every 200 ms to feed the
+        # deadman, but the keepalive is already refreshing the Uno at 10 Hz.
+        # Writing it again just adds contention on the port for no effect, so
+        # only an actual change goes out here.
+        changed = (vx, vy, w) != self._vel
         self._vel = (vx, vy, w)
-        self._send(f"v {vx:.0f} {vy:.0f} {w:.0f}")
+        if changed:
+            self._send(f"v {vx:.0f} {vy:.0f} {w:.0f}")
 
     def stop(self):
         if self.recorder is not None:
