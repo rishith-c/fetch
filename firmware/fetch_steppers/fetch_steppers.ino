@@ -52,9 +52,9 @@ const float MAX_SPS       = MAX_MS * (STEPS_PER_REV / WHEEL_CIRC_M);
 //   so the lap time is chosen to land there. A shorter lap = faster = stall.
 //   amp is also capped at 1/sqrt(2) so setVel()'s normaliser never clips the
 //   sweep; clipping would flatten the fast quadrants into an oval.
-const float CIRCLE_RADIUS_M = 0.6096;           // 2 ft
-const float SECONDS_PER_LAP = 22.0;             // -> ~261 steps/s peak
-const float CRAB_RAMP_S     = 1.2;              // ease in/out, no stall on start
+const float CIRCLE_RADIUS_M = 0.3048;           // 1 ft radius = 2 ft ACROSS
+const float SECONDS_PER_LAP = 11.0;             // -> ~261 steps/s peak
+const float CRAB_RAMP_S     = 0.8;              // ease in/out, no stall on start
 const int   CRAB_SLICE_MS   = 5;                // 4400 vector updates per lap
 
 float curVX = 0, curVY = 0, curW = 0;
