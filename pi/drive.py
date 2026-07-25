@@ -105,6 +105,10 @@ class Robot:
         self._vel = (0, 0, 0)
         self._send(f"m {int(i)} {int(spd)}")
 
+    def guard(self, on):
+        """Arm/disarm the Uno's front-obstacle veto."""
+        self._send(f"g {1 if on else 0}")
+
     def tilt(self, deg):
         self._send(f"t {int(max(0, min(180, deg)))}")
 

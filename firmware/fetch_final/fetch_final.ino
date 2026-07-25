@@ -62,13 +62,27 @@ const int FRONT = 0, VETO_CM = 25;
 // The front-obstacle veto is OFF until the sensors are proven. An interlock
 // fed by garbage data just blocks legitimate driving: a rail glitch pinned
 // the front reading at 5 cm and forward stopped working entirely.
-//   'g 1' arms it, 'g 0' disarms, and it needs two consecutive close reads
+//   Armed by default now that the sensors read reliably. 'g 0' disarms.
+//   Needs two consecutive close reads
 //   plus a plausible distance (HC-SR04 cannot resolve under ~2 cm).
-bool guardOn = false;
+bool guardOn = true;    // obstacle avoidance armed at boot
 int  frontHits = 0;
 const int VETO_MIN_CM = 3, VETO_CONFIRM = 2;
 int usCM[5] = { 0, 0, 0, 0, 0 };
 int usIdx = 0;
+// Median-of-3 per sensor. A shared TRIG means all five ping at once, so a
+// sensor occasionally hears a neighbour's burst before its own return and
+// reports a wild short value. A median rejects that single outlier while
+// still tracking real movement.
+int usHist[5][3] = {{0}};
+byte usSlot[5] = { 0, 0, 0, 0, 0 };
+
+int median3(int a, int b, int c) {
+  if (a > b) { int t = a; a = b; b = t; }
+  if (b > c) { int t = b; b = c; c = t; }
+  if (a > b) { int t = a; a = b; b = t; }
+  return b;
+}
 
 const int SERVO_PIN = 11;
 Servo tilt;
@@ -96,12 +110,23 @@ void setVel(float vx, float vy, float w) {
 
 void runAll() { for (int i = 0; i < 4; i++) M[i]->runSpeed(); }
 
+// pulseIn() blocks, so its timeout is stolen from stepper pulse generation.
+// Standing still that costs nothing, so use the sensor's full ~4 m range;
+// while driving, cap at ~1 m so the stall stays an inaudible blip.
+unsigned long echoTimeoutUs() {
+  bool moving = (fabs(curVX) + fabs(curVY) + fabs(curW)) > 0.05;
+  return moving ? 6000UL : 23000UL;
+}
+
 void pingOne(int i) {
   digitalWrite(TRIG, LOW);  delayMicroseconds(4);
   digitalWrite(TRIG, HIGH); delayMicroseconds(10);
   digitalWrite(TRIG, LOW);
-  unsigned long us = pulseIn(ECHO[i], HIGH, 6000UL);   // 6 ms cap ~ 1 m
-  usCM[i] = us ? (int)(us / 58) : 0;
+  unsigned long us = pulseIn(ECHO[i], HIGH, echoTimeoutUs());
+  int raw = us ? (int)(us / 58) : 0;
+  usHist[i][usSlot[i]] = raw;
+  usSlot[i] = (usSlot[i] + 1) % 3;
+  usCM[i] = median3(usHist[i][0], usHist[i][1], usHist[i][2]);
   if (i == FRONT) {
     bool close = (usCM[FRONT] >= VETO_MIN_CM && usCM[FRONT] < VETO_CM);
     frontHits = close ? frontHits + 1 : 0;
@@ -205,7 +230,9 @@ void loop() {
   }
 
   bool moving = (fabs(curVX) + fabs(curVY) + fabs(curW)) > 0.05;
-  if (millis() - lastPing >= (unsigned long)(moving ? 150 : 30)) {
+  // >=60 ms between TRIG pulses: with one shared trigger wire the tick rate
+  // IS each sensor's re-trigger rate. 30 ms was re-firing them mid-echo.
+  if (millis() - lastPing >= (unsigned long)(moving ? 150 : 70)) {
     lastPing = millis();
     pingOne(usIdx);
     usIdx = (usIdx + 1) % 5;

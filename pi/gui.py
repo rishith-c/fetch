@@ -47,6 +47,9 @@ class FakeRobot:
     def motor(self, i, spd):
         print(f"[fake] motor {i} spd={spd}")
 
+    def guard(self, on):
+        print(f"[fake] guard {on}")
+
     def tilt(self, deg):
         print(f"[fake] tilt {deg}")
 
@@ -97,10 +100,20 @@ PAGE = r"""<!doctype html>
   input[type=range]{width:100%;accent-color:var(--acc)}
   .val{float:right;font:12px ui-monospace,monospace;color:var(--acc)}
   .sensors{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;text-align:center}
-  .sensors div{background:#11131a;border:1px solid var(--line);border-radius:8px;padding:7px 2px}
-  .sensors b{display:block;font:14px ui-monospace,monospace;color:var(--go)}
-  .sensors b.near{color:var(--stop)}
+  .sensors div{background:#11131a;border:1px solid var(--line);border-radius:8px;
+               padding:8px 2px 6px;transition:border-color .15s}
+  .sensors b{display:block;font:17px ui-monospace,monospace;line-height:1.1;
+             color:var(--go);transition:color .15s}
+  .sensors b small{font-size:9px;opacity:.5}
   .sensors span{font-size:9px;color:var(--dim);letter-spacing:.06em}
+  .bar{height:4px;border-radius:2px;background:#22252e;margin:5px 3px 0;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--go);transition:width .2s,background .15s}
+  .warn b,.warn i{color:var(--acc);background:var(--acc)}
+  .stopz b,.stopz i{color:var(--stop);background:var(--stop)}
+  .stopz{border-color:var(--stop)!important}
+  .guardrow{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-top:10px}
+  #guardbtn{height:38px;font-size:11px;letter-spacing:.08em;padding:0 14px}
+  #guardbtn.armed{background:var(--go);color:#07200f;border-color:var(--go)}
   footer{margin-top:14px;font-size:11.5px;color:var(--dim);text-align:center}
 </style>
 
@@ -154,11 +167,16 @@ PAGE = r"""<!doctype html>
 <div class="card">
   <h2>Ultrasonic (cm · 0 = clear)</h2>
   <div class="sensors">
-    <div><b id="s_lf">0</b><span>L-FRT</span></div>
-    <div><b id="s_f">0</b><span>FRONT</span></div>
-    <div><b id="s_rf">0</b><span>R-FRT</span></div>
-    <div><b id="s_lr">0</b><span>L-REAR</span></div>
-    <div><b id="s_rr">0</b><span>R-REAR</span></div>
+    <div id="c_lf"><b id="s_lf">—</b><span>L-FRT</span><div class="bar"><i id="b_lf"></i></div></div>
+    <div id="c_f"><b id="s_f">—</b><span>FRONT</span><div class="bar"><i id="b_f"></i></div></div>
+    <div id="c_rf"><b id="s_rf">—</b><span>R-FRT</span><div class="bar"><i id="b_rf"></i></div></div>
+    <div id="c_lr"><b id="s_lr">—</b><span>L-REAR</span><div class="bar"><i id="b_lr"></i></div></div>
+    <div id="c_rr"><b id="s_rr">—</b><span>R-REAR</span><div class="bar"><i id="b_rr"></i></div></div>
+  </div>
+  <div class="guardrow">
+    <small style="color:var(--dim);font-size:11.5px">Obstacle avoidance blocks
+      forward motion under 25&nbsp;cm</small>
+    <button id="guardbtn" class="armed">ARMED</button>
   </div>
 </div>
 
@@ -271,18 +289,33 @@ $('#calsave').onclick = async ()=>{
                              '\nTell Claude — it will flash the fix.';
 };
 
-// --- live sensor poll ---
+// --- obstacle-avoidance toggle ---
+let armed = true;
+$('#guardbtn').onclick = ()=>{
+  armed = !armed;
+  $('#guardbtn').classList.toggle('armed', armed);
+  $('#guardbtn').textContent = armed ? 'ARMED' : 'OFF';
+  post('/guard', {on: armed});
+};
+
+// --- live sensor poll: 4 Hz, bar + colour bands ---
+const RANGE = 120;                       // cm mapped to a full bar
 setInterval(async ()=>{
   try{
     const r = await fetch('/state'); const j = await r.json();
     for(const k of ['f','lf','rf','lr','rr']){
-      const el = $('#s_'+k); el.textContent = j.sensors[k];
-      el.className = (j.sensors[k] > 0 && j.sensors[k] < 30) ? 'near' : '';
+      const v = j.sensors[k];
+      const val = $('#s_'+k), bar = $('#b_'+k), cell = $('#c_'+k);
+      // 0 means no echo inside range, which is 'clear', not 'touching'
+      val.innerHTML = v > 0 ? v + '<small>cm</small>' : '—';
+      bar.style.width = (v > 0 ? Math.min(100, v / RANGE * 100) : 100) + '%';
+      cell.className = (v > 0 && v < 25) ? 'stopz'
+                     : (v > 0 && v < 50) ? 'warn' : '';
     }
     $('#link').textContent = j.port;
     $('#link').classList.remove('bad');
   }catch(e){ $('#link').textContent = 'link lost'; $('#link').classList.add('bad'); }
-}, 400);
+}, 250);
 </script>
 """
 
@@ -373,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.deadman.touch()
             else:
                 self.deadman.clear()
+        elif p.startswith("/guard"):
+            self.robot.guard(bool(data.get("on", True)))
         elif p.startswith("/cal"):
             with open("/home/varun/calibration.json", "w") as fh:
                 json.dump(data.get("answers", {}), fh)
