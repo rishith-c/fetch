@@ -82,9 +82,9 @@ usual pin.
 
 ## Printed parts
 
-Five parts, about five hours of printing all together, which we started early
-and ran while writing firmware. The chassis is the long pole by a wide margin,
-so print that one first and do everything else while it runs.
+Five parts, about five hours of printing all together, which ran while we
+wrote firmware. The chassis is the long pole by a wide margin, so print that
+one first and do everything else while it runs.
 
 | | Part | Size (mm) | Print time | Filament |
 |---|---|---|---|---|
@@ -97,6 +97,26 @@ so print that one first and do everything else while it runs.
 Times are what our printers actually did at 0.3 mm layers and 15 percent
 infill. A slower machine will take considerably longer, so slice before you
 commit to a schedule.
+
+## How much of this was fixed with a knife
+
+Every part was printed during the hackathon. Nothing came off a plate before
+the clock started, which meant the CAD had to be finished in the same hours as
+the firmware, and it shows.
+
+Roughly 80 percent of the parts needed cutting or modifying by hand before
+they would fit. Holes drilled out, walls trimmed, mounting faces filed back.
+Print quality was poor at the speed we ran, so tolerances that would have been
+fine on a careful print were not close enough to assemble.
+
+Three of the four chassis joints needed super glue and repair work to hold.
+The robot that won is held together partly with adhesive and partly with
+patience.
+
+If you are rebuilding this, print the chassis first and dry fit it before
+committing to the rest. Most of what we cut by hand was avoidable with one
+test print and an hour of tolerance work, which is exactly the hour we did not
+have.
 
 ## Software
 
