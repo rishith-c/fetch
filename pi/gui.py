@@ -27,6 +27,12 @@ try:
 except ImportError:
     Robot = None
 
+try:
+    from fetch_auto import Vision
+except Exception as _e:            # camera libs missing etc - GUI still runs
+    Vision = None
+    print(f"[gui] vision unavailable: {_e}")
+
 
 class FakeRobot:
     """Stand-in so the UI can be developed and tested with no robot attached."""
@@ -121,6 +127,12 @@ PAGE = r"""<!doctype html>
   <h1>FETCH <span>control</span></h1>
   <div id="link">connecting…</div>
 </header>
+
+<div class="card" id="camcard" style="padding:10px">
+  <h2>Camera <span class="val" id="camstat">…</span></h2>
+  <img id="cam" style="width:100%;border-radius:9px;display:block;background:#0a0b0e"
+       alt="camera">
+</div>
 
 <div class="pad">
   <button data-vx="60"  data-vy="-60">↖<small>DIAG</small></button>
@@ -289,6 +301,16 @@ $('#calsave').onclick = async ()=>{
                              '\nTell Claude — it will flash the fix.';
 };
 
+// --- camera feed ---
+(function(){
+  const img = $('#cam'), stat = $('#camstat');
+  fetch('/state').then(r=>r.json()).then(j=>{
+    if(j.cam){ img.src = '/camera.mjpg'; stat.textContent = 'live'; }
+    else { stat.textContent = 'not detected'; $('#camcard').style.opacity = .5; }
+  }).catch(()=>{ stat.textContent = 'offline'; });
+  img.onerror = ()=>{ stat.textContent = 'stream error'; };
+})();
+
 // --- obstacle-avoidance toggle ---
 let armed = true;
 $('#guardbtn').onclick = ()=>{
@@ -314,6 +336,8 @@ setInterval(async ()=>{
     }
     $('#link').textContent = j.port;
     $('#link').classList.remove('bad');
+    const cs = $('#camstat');
+    if(j.cam) cs.textContent = j.tag ? ('TAG ' + j.tag.id) : 'live · no tag';
   }catch(e){ $('#link').textContent = 'link lost'; $('#link').classList.add('bad'); }
 }, 250);
 </script>
@@ -359,6 +383,7 @@ class Deadman:
 class Handler(BaseHTTPRequestHandler):
     robot = None
     deadman = None
+    vision = None
 
     def log_message(self, *a):
         pass                                   # keep the console clean
@@ -373,7 +398,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/state"):
-            return self._json({"sensors": self.robot.sensors, "port": self.robot.port})
+            v = self.vision
+            tag = v.tag if v else None
+            return self._json({
+                "sensors": self.robot.sensors,
+                "port": self.robot.port,
+                "cam": bool(v and v.ok),
+                "tag": tag,
+                "zones": (v.zones if (v and v.fresh) else None),
+            })
+
+        if self.path.startswith("/camera.mjpg"):
+            if not (self.vision and self.vision.ok):
+                self.send_response(503); self.end_headers(); return
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                while True:
+                    jpg = self.vision.latest_jpeg()
+                    if jpg:
+                        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n"
+                                         b"Content-Length: " + str(len(jpg)).encode()
+                                         + b"\r\n\r\n" + jpg + b"\r\n")
+                    time.sleep(0.1)          # 10 fps is plenty and keeps CPU free
+            except (BrokenPipeError, ConnectionResetError):
+                return
         body = PAGE.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -441,6 +493,10 @@ if __name__ == "__main__":
         Handler.robot = Robot(args.serial)
         print(f"connected to {Handler.robot.port}")
     Handler.deadman = Deadman(Handler.robot)
+
+    if Vision is not None and not args.fake:
+        Handler.vision = Vision()
+        Handler.vision.start()
 
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     print(f"\n  open  http://{my_ip()}:{args.port}   (ctrl-C to quit)\n")

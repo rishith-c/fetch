@@ -54,17 +54,33 @@ class Robot:
 
     # ---------- background threads ----------
     def _reader(self):
+        """Accumulate bytes and split on newlines.
+
+        readline() must NOT be used here: the port timeout (0.1 s) is shorter
+        than the Uno's 140 ms report interval, so it returns half-lines like
+        "us f=1" that fail to parse. The values then never update and every
+        sensor reads a permanent 0 while the Uno is actually seeing obstacles.
+        """
+        buf = b""
         while not self._stop.is_set():
             try:
-                line = self.ser.readline().decode(errors="ignore").strip()
+                chunk = self.ser.read(256)          # whatever has arrived
             except Exception:
                 break
-            if line.startswith("us "):
-                for tok in line[3:].split():
-                    if "=" in tok:
-                        k, v = tok.split("=", 1)
-                        if k in self.sensors and v.lstrip("-").isdigit():
-                            self.sensors[k] = int(v)
+            if not chunk:
+                continue
+            buf += chunk
+            while b"\n" in buf:
+                raw, buf = buf.split(b"\n", 1)
+                line = raw.decode(errors="ignore").strip()
+                if line.startswith("us "):
+                    for tok in line[3:].split():
+                        if "=" in tok:
+                            k, v = tok.split("=", 1)
+                            if k in self.sensors and v.lstrip("-").isdigit():
+                                self.sensors[k] = int(v)
+            if len(buf) > 512:                     # never grow unbounded
+                buf = buf[-256:]
 
     def _keepalive(self):
         """Uno kills the motors if v goes quiet 500 ms — refresh at 10 Hz."""
