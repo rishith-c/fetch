@@ -1,0 +1,15 @@
+[Unit]
+Description=FETCH robot web control GUI
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/varun
+ExecStart=/usr/bin/python3 -u /home/varun/gui.py --port 8080
+# The Uno may enumerate after us on a cold boot, and gui.py exits if the
+# serial port is missing. Retry forever instead of giving up.
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
