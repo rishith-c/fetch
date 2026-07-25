@@ -105,6 +105,18 @@ unsigned long lastV = 0, lastPing = 0, lastReport = 0;
 char line[40];
 byte lineLen = 0;
 
+// A stepper cannot START at its running speed. Pull-in torque collapses with
+// rate, so commanding 0 -> 520 sps in one step makes a loaded wheel slip
+// instead of turn. Whichever wheels slip, the robot rotates: on a strafe all
+// four are fighting roller friction, so it shows up there first and worst.
+// Targets are therefore ramped toward, not jumped to.
+float wheelTgt[4] = {0, 0, 0, 0};    // what the mix asked for, sps
+float wheelCur[4] = {0, 0, 0, 0};    // what the motors are actually running
+unsigned long lastSlewUs = 0;
+// Full scale in ~0.2 s. Slower is safer against stalls but feels sluggish;
+// this puts the first 20 ms tick around 50 sps, well inside pull-in.
+float SLEW_SPS_PER_S = 2600.0;
+
 void setVel(float vx, float vy, float w) {
   if (guardOn && vx > 0 && frontHits >= VETO_CONFIRM) vx = 0;   // veto
   curVX = vx; curVY = vy; curW = w;
@@ -116,7 +128,35 @@ void setVel(float vx, float vy, float w) {
   float mx = 0;
   for (int i = 0; i < 4; i++) mx = max(mx, fabs(s[i]));
   if (mx > 1.0) for (int i = 0; i < 4; i++) s[i] /= mx;
-  for (int i = 0; i < 4; i++) M[i]->setSpeed(POL[i] * s[i] * MAX_SPS);
+  for (int i = 0; i < 4; i++) wheelTgt[i] = POL[i] * s[i] * MAX_SPS;
+}
+
+void applySlew() {
+  unsigned long now = micros();
+  float dt = (now - lastSlewUs) / 1000000.0f;
+  lastSlewUs = now;
+  if (dt <= 0 || dt > 0.25f) dt = 0.01f;      // first call, or a long stall
+  float step = SLEW_SPS_PER_S * dt;
+  for (int i = 0; i < 4; i++) {
+    float t = wheelTgt[i], c = wheelCur[i];
+    bool opposing = (t > 0 && c < 0) || (t < 0 && c > 0);
+    if (opposing) {
+      // A full reversal is a bigger jump than starting from rest, so drop to
+      // zero this tick and ramp up the other way from there.
+      c = 0;
+    } else if (fabs(t) <= fabs(c)) {
+      // Slowing never stalls a stepper, and STOP has to stay instant.
+      c = t;
+    } else if (t - c >  step) {
+      c += step;
+    } else if (t - c < -step) {
+      c -= step;
+    } else {
+      c = t;
+    }
+    wheelCur[i] = c;
+    M[i]->setSpeed(c);
+  }
 }
 
 void runAll() { for (int i = 0; i < 4; i++) M[i]->runSpeed(); }
@@ -125,6 +165,8 @@ void runAll() { for (int i = 0; i < 4; i++) M[i]->runSpeed(); }
 // Standing still that costs nothing, so use the sensor's full ~4 m range;
 // while driving, cap at ~1 m so the stall stays an inaudible blip.
 unsigned long echoTimeoutUs() {
+  applySlew();      // step the wheels toward their target before running them
+
   bool moving = (fabs(curVX) + fabs(curVY) + fabs(curW)) > 0.05;
   return moving ? 6000UL : 23000UL;
 }
@@ -196,6 +238,12 @@ void handleLine() {
       setVel(curVX, curVY, curW);        // re-apply at the new scale
     }
     Serial.print("maxsps="); Serial.println(MAX_SPS);
+  } else if (c == 'a') {
+    // a <sps/s> : how hard the wheels are allowed to accelerate. Lower it if
+    // a strafe still slips, raise it if the robot feels sluggish.
+    long v = strtol(line + 1, NULL, 10);
+    if (v >= 300 && v <= 20000) SLEW_SPS_PER_S = (float)v;
+    Serial.print("slew="); Serial.println(SLEW_SPS_PER_S);
   } else if (c == 'g') {
     guardOn = (strtol(line + 1, NULL, 10) != 0);
     Serial.print("guard="); Serial.println(guardOn ? "ON" : "OFF");
@@ -255,6 +303,8 @@ void loop() {
       if (lineLen == 1 && strchr("fblrqsec+-?", ch)) handleLine();
     }
   }
+
+  applySlew();      // step the wheels toward their target before running them
 
   bool moving = (fabs(curVX) + fabs(curVY) + fabs(curW)) > 0.05;
   // >=60 ms between TRIG pulses: with one shared trigger wire the tick rate
